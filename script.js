@@ -13,9 +13,11 @@ const repoNameInput = document.getElementById("repoName");
 const submitBtn = form.querySelector("button[type='submit']");
 
 let currentUser = null;
+let userRepos = [];
 
 function setSignedOutState(message) {
   currentUser = null;
+  userRepos = [];
   signOutBtn.style.display = 'none';
   authPanel.classList.remove('hidden');
   schedulerPanel.classList.add('hidden');
@@ -41,6 +43,41 @@ function setSignedInState(user) {
     repoOwnerInput.value = user.login || '';
     repoOwnerInput.placeholder = user.login || 'your GitHub username';
   }
+
+  fetchRepos();
+}
+
+async function fetchRepos() {
+  if (repoNameInput.tagName !== 'SELECT') return;
+  
+  repoNameInput.innerHTML = '<option value="" disabled selected>Loading repositories...</option>';
+  try {
+    const response = await fetch('/api/repos');
+    const data = await response.json();
+    if (data.success && data.repos) {
+      userRepos = data.repos;
+      repoNameInput.innerHTML = '<option value="" disabled selected>Select a repository</option>';
+      userRepos.forEach(repo => {
+        const option = document.createElement('option');
+        option.value = repo.name;
+        option.textContent = repo.name + (repo.private ? ' (Private)' : '');
+        repoNameInput.appendChild(option);
+      });
+    } else {
+      repoNameInput.innerHTML = '<option value="" disabled selected>Failed to load repos</option>';
+    }
+  } catch (err) {
+    repoNameInput.innerHTML = '<option value="" disabled selected>Error loading repos</option>';
+  }
+}
+
+if (repoNameInput && repoNameInput.tagName === 'SELECT') {
+  repoNameInput.addEventListener('change', () => {
+    const selected = userRepos.find(r => r.name === repoNameInput.value);
+    if (selected && selected.defaultBranch) {
+      document.getElementById('branch').value = selected.defaultBranch;
+    }
+  });
 }
 
 function showInlineMessage(message, type = 'danger') {
@@ -106,8 +143,40 @@ signOutBtn.addEventListener('click', async () => {
 if (filterMode) {
   filterMode.addEventListener('change', () => {
     selectedDaysPanel.classList.toggle('hidden', filterMode.value !== 'selected');
+    updateWeekdayInputsState();
   });
 }
+
+const selectedDaysCheckboxes = document.querySelectorAll("#selectedDays input");
+selectedDaysCheckboxes.forEach(cb => {
+  cb.addEventListener('change', updateWeekdayInputsState);
+});
+
+function updateWeekdayInputsState() {
+  const mode = filterMode.value;
+  const weekdayInputs = document.querySelectorAll("[data-weekday]");
+  
+  const checkedDays = Array.from(selectedDaysCheckboxes)
+    .filter(cb => cb.checked)
+    .map(cb => cb.value);
+
+  weekdayInputs.forEach(input => {
+    const day = input.dataset.weekday;
+    let enabled = true;
+    
+    if (mode === 'odd') enabled = ['monday', 'wednesday', 'friday', 'sunday'].includes(day);
+    else if (mode === 'even') enabled = ['tuesday', 'thursday', 'saturday'].includes(day);
+    else if (mode === 'weekends') enabled = ['saturday', 'sunday'].includes(day);
+    else if (mode === 'weekdays') enabled = !['saturday', 'sunday'].includes(day);
+    else if (mode === 'selected') enabled = checkedDays.includes(day);
+    
+    input.disabled = !enabled;
+    input.parentElement.style.opacity = enabled ? '1' : '0.4';
+  });
+}
+
+// Initial state
+updateWeekdayInputsState();
 
 function formatETA(seconds) {
   const totalSeconds = Math.max(0, Math.round(seconds));

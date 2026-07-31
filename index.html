@@ -108,8 +108,10 @@
               </label>
 
               <label>
-                Repo name
-                <input type="text" id="repoName" placeholder="e.g. my-repo" required />
+                Repository
+                <select id="repoName" required>
+                  <option value="" disabled selected>Loading repositories...</option>
+                </select>
               </label>
             </div>
 
@@ -164,6 +166,7 @@
             <label>
               Branch name
               <input type="text" id="branch" value="main" />
+              <span class="push-hint" style="display: block; margin-top: 6px;">Note: Commits must be on the repository's default branch (e.g., main or master) to appear on your GitHub contribution graph.</span>
             </label>
 
             <button type="submit" class="primary-button submit-button">Generate commit schedule</button>
