@@ -105,12 +105,22 @@ async function ensureGitIdentity() {
 
 async function ensureGitHubAuth() {
   try {
-    await execFileAsync("git", ["remote", "get-url", "origin"], { cwd: repoRoot });
+    const remoteUrl = (await execFileAsync("git", ["remote", "get-url", "origin"], { cwd: repoRoot })).stdout.trim();
+    if (!remoteUrl.includes("github.com")) {
+      throw new Error("The repo remote is not a GitHub URL.");
+    }
+
     await execFileAsync("gh", ["auth", "status"], { cwd: repoRoot });
     await execFileAsync("gh", ["auth", "setup-git"], { cwd: repoRoot });
+
+    const remoteCheck = await execFileAsync("git", ["ls-remote", "--heads", "origin"], { cwd: repoRoot });
+    if (!remoteCheck.stdout) {
+      throw new Error("GitHub remote is reachable but does not expose any branch metadata.");
+    }
   } catch (error) {
+    const message = error && error.message ? error.message : "Unknown GitHub auth error";
     throw new Error(
-      "GitHub authentication is not active. Run: gh auth login -h github.com -w and then gh auth setup-git. GitHub Desktop is not required."
+      `GitHub authentication or remote access is not valid for this repository. ${message}. Run: gh auth login -h github.com -w, then gh auth setup-git, and confirm the remote is writable by your account.`
     );
   }
 }
@@ -219,12 +229,22 @@ async function generateCommits(payload) {
     }
   }
 
+  let pushResult = {
+    enabled: false,
+    status: "not_attempted",
+    message: "Push was not requested.",
+  };
+
   if (pushToRemote) {
-    await ensureGitHubAuth();
+    pushResult.enabled = true;
     try {
+      await ensureGitHubAuth();
       await execFileAsync("git", ["push", "--set-upstream", "origin", `HEAD:${targetBranch}`], { cwd: repoRoot });
+      pushResult.status = "success";
+      pushResult.message = `Pushed successfully to origin/${targetBranch}`;
     } catch (error) {
-      throw new Error(`Push failed: ${error.message}`);
+      pushResult.status = "failed";
+      pushResult.message = error.message || "GitHub push failed.";
     }
   }
 
@@ -236,6 +256,7 @@ async function generateCommits(payload) {
     selectedDays: selectedDates.length,
     commitsCreated: totalCommitCount,
     pushToRemote,
+    pushResult,
     created,
   };
 }
