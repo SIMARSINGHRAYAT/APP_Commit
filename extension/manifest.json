@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "CommitFlow",
+  "version": "1.0",
+  "description": "Professional GitHub commit scheduler and contribution graph automation.",
+  "action": {
+    "default_popup": "index.html",
+    "default_title": "Open CommitFlow"
+  },
+  "host_permissions": [
+    "https://app-commit-ten.vercel.app/*",
+    "https://api.github.com/*"
+  ]
+}

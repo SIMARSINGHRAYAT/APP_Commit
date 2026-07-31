@@ -1,3 +1,17 @@
+const BASE_URL = 'https://app-commit-ten.vercel.app';
+
+// Intercept fetch calls to redirect /api to the remote Vercel backend
+const originalFetch = window.fetch;
+window.fetch = async function() {
+  let [resource, config] = arguments;
+  if (typeof resource === 'string' && resource.startsWith('/api')) {
+    resource = BASE_URL + resource;
+    config = config || {};
+    config.credentials = 'include';
+  }
+  return originalFetch(resource, config);
+};
+
 const authPanel = document.getElementById("authPanel");
 const schedulerPanel = document.getElementById("schedulerPanel");
 const authStatus = document.getElementById("authStatus");
@@ -128,7 +142,9 @@ async function initializeApp() {
 
 githubLoginBtn.addEventListener('click', () => {
   if (githubLoginBtn.disabled) return;
-  window.location.href = '/api/auth/login';
+  // In extensions, we cannot redirect the popup to GitHub due to framing restrictions.
+  // We open the auth flow in a new tab instead.
+  window.open(BASE_URL + '/api/auth/login', '_blank');
 });
 
 signOutBtn.addEventListener('click', async () => {
