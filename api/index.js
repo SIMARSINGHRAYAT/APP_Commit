@@ -1,15 +1,13 @@
 import moment from 'moment';
 
-const defaultResponseHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-};
-
 function sendJson(res, statusCode, payload) {
+  const origin = res.req?.headers?.origin || '*';
   res.writeHead(statusCode, {
     'Content-Type': 'application/json',
-    ...defaultResponseHeaders,
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Credentials': 'true',
   });
   res.end(JSON.stringify(payload));
 }
@@ -41,8 +39,8 @@ function decodeSessionCookie(req) {
 
 function setSessionCookie(res, user) {
   const session = Buffer.from(JSON.stringify(user)).toString('base64url');
-  const secureFlag = process.env.APP_BASE_URL?.startsWith('https://') ? '; Secure' : '';
-  res.setHeader('Set-Cookie', `gh_session=${session}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400${secureFlag}`);
+  // Use SameSite=None; Secure to allow the extension to send the cookie cross-origin
+  res.setHeader('Set-Cookie', `gh_session=${session}; Path=/; HttpOnly; SameSite=None; Secure; Max-Age=86400`);
 }
 
 function resolveGitHubIdentity(user = {}, env = process.env) {
@@ -543,6 +541,9 @@ export default async function handler(req, res) {
   const url = new URL(req.url, 'https://example.com');
   const normalizedPath = url.pathname.replace(/^\/api/, '');
   console.log('API request', req.method, 'req.url=', req.url, 'pathname=', url.pathname, 'normalized=', normalizedPath);
+
+  // Attach req to res so sendJson can access headers.origin
+  res.req = req;
 
   // ── Auth routes ─────────────────────────────────────────────────────────
 
