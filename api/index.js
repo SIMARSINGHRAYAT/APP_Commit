@@ -47,12 +47,14 @@ function setSessionCookie(res, user) {
 
 function resolveGitHubIdentity(user = {}, env = process.env) {
   const login = user.login || env.GITHUB_LOGIN || 'github-user';
-  const email = user.email || env.GITHUB_EMAIL || `${login}@users.noreply.github.com`;
+  const id = user.id || null;
+  // GitHub requires the ID-based noreply email for contribution graph attribution
+  const email = user.email || env.GITHUB_EMAIL || (id ? `${id}+${login}@users.noreply.github.com` : `${login}@users.noreply.github.com`);
   const accessToken = user.accessToken || env.GITHUB_TOKEN || null;
   const repoOwner = user.repoOwner || env.REPO_OWNER || login;
   const repoName = user.repoName || env.REPO_NAME || 'APP_Commit';
 
-  return { login, email, accessToken, repoOwner, repoName };
+  return { login, id, email, accessToken, repoOwner, repoName };
 }
 
 // ─── Enhanced fetch with contextual error messages ──────────────────────────
@@ -104,18 +106,30 @@ async function getGitHubUserFromToken(accessToken) {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
 
+  const userId = user.id;
   let email = user.email || null;
   if (!email) {
-    const emailList = await fetchJson('https://api.github.com/user/emails', {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    const primary = Array.isArray(emailList)
-      ? emailList.find((entry) => entry.primary && entry.verified) || emailList.find((entry) => entry.verified)
-      : null;
-    email = primary ? primary.email : `${user.login}@users.noreply.github.com`;
+    try {
+      const emailList = await fetchJson('https://api.github.com/user/emails', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const primary = Array.isArray(emailList)
+        ? emailList.find((entry) => entry.primary && entry.verified) || emailList.find((entry) => entry.verified)
+        : null;
+      email = primary ? primary.email : null;
+    } catch (e) {
+      // user:email scope might not be available, that's ok
+      email = null;
+    }
   }
 
-  return { login: user.login, email, accessToken };
+  // If we still don't have an email, use the GitHub ID-based noreply format
+  // This is CRITICAL for the contribution graph to work
+  if (!email) {
+    email = `${userId}+${user.login}@users.noreply.github.com`;
+  }
+
+  return { login: user.login, id: userId, email, accessToken };
 }
 
 async function exchangeCodeForToken(code) {
