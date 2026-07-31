@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildDateWindow, isDateSelected, resolveDailyCount } from './index.js';
+import { buildDateWindow, isDateSelected, resolveDailyCount, resolveGitHubIdentity } from './index.js';
 
 test('buildDateWindow includes every day in the requested range', () => {
   const days = buildDateWindow('2026-07-01', '2026-07-03');
@@ -19,4 +19,15 @@ test('daily count uses the configured value when no randomization is enabled', (
   const date = new Date('2026-07-03T00:00:00Z');
   const payload = { dailyCount: 5, randomize: false };
   assert.equal(resolveDailyCount(date, payload), 5);
+});
+
+test('per-user GitHub identity takes precedence over deployment-wide fallback values', () => {
+  const user = { login: 'alice', email: 'alice@example.com', accessToken: 'token-123' };
+  const env = { GITHUB_LOGIN: 'fallback-user', GITHUB_EMAIL: 'fallback@example.com' };
+
+  const identity = resolveGitHubIdentity(user, env);
+
+  assert.equal(identity.login, 'alice');
+  assert.equal(identity.email, 'alice@example.com');
+  assert.equal(identity.accessToken, 'token-123');
 });

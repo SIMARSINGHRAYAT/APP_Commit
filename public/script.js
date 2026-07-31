@@ -41,8 +41,12 @@ async function checkGitHubAuth() {
   }
 }
 
-githubLoginBtn.addEventListener("click", checkGitHubAuth);
-signOutBtn.addEventListener("click", () => {
+githubLoginBtn.addEventListener("click", () => {
+  window.location.href = "/auth/github/login";
+});
+
+signOutBtn.addEventListener("click", async () => {
+  await fetch("/auth/logout");
   authPanel.classList.remove("hidden");
   schedulerPanel.classList.add("hidden");
   authStatus.textContent = "Signed out. Connect a GitHub account to continue.";
@@ -86,6 +90,8 @@ form.addEventListener("submit", async (event) => {
     selectedDays,
     weekdayCounts,
     branch: document.getElementById("branch").value,
+    repoOwner: document.getElementById("repoOwner").value,
+    repoName: document.getElementById("repoName").value,
     pushToRemote: document.getElementById("pushToRemote").checked,
   };
 

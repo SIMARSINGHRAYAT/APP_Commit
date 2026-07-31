@@ -4,11 +4,6 @@ import moment from 'moment';
 
 const execFileAsync = promisify(execFile);
 const repoRoot = process.cwd();
-const fallbackUser = {
-  login: process.env.GITHUB_LOGIN || 'SIMARSINGHRAYAT',
-  email: process.env.GITHUB_EMAIL || 'simarsinghrayat03@gmail.com',
-};
-
 const defaultResponseHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -16,28 +11,127 @@ const defaultResponseHeaders = {
 };
 
 function sendJson(res, statusCode, payload) {
-  res.setHeader('Content-Type', 'application/json');
-  Object.entries(defaultResponseHeaders).forEach(([k, v]) => res.setHeader(k, v));
-  res.statusCode = statusCode;
+  res.writeHead(statusCode, {
+    'Content-Type': 'application/json',
+    ...defaultResponseHeaders,
+  });
   res.end(JSON.stringify(payload));
 }
 
-function parseBody(req) {
-  return new Promise((resolve, reject) => {
-    let body = '';
-    req.on('data', (chunk) => {
-      body += chunk;
-    });
-    req.on('end', () => {
-      if (!body) return resolve({});
-      try {
-        resolve(JSON.parse(body));
-      } catch (error) {
-        reject(new Error('Invalid JSON body.'));
-      }
-    });
-    req.on('error', reject);
+function parseCookies(req) {
+  const header = req.headers.cookie || '';
+  return Object.fromEntries(
+    header
+      .split(';')
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part) => {
+        const index = part.indexOf('=');
+        return index === -1 ? [part, ''] : [part.slice(0, index), decodeURIComponent(part.slice(index + 1))];
+      })
+  );
+}
+
+function decodeSessionCookie(req) {
+  const cookieValue = parseCookies(req).gh_session;
+  if (!cookieValue) return null;
+
+  try {
+    return JSON.parse(Buffer.from(cookieValue, 'base64url').toString('utf8'));
+  } catch (error) {
+    return null;
+  }
+}
+
+function setSessionCookie(res, user) {
+  const session = Buffer.from(JSON.stringify(user)).toString('base64url');
+  const secureFlag = process.env.APP_BASE_URL?.startsWith('https://') ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `gh_session=${session}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400${secureFlag}`);
+}
+
+function resolveGitHubIdentity(user = {}, env = process.env) {
+  const login = user.login || env.GITHUB_LOGIN || 'github-user';
+  const email = user.email || env.GITHUB_EMAIL || `${login}@users.noreply.github.com`;
+  const accessToken = user.accessToken || env.GITHUB_TOKEN || null;
+  const repoOwner = user.repoOwner || env.REPO_OWNER || login;
+  const repoName = user.repoName || env.REPO_NAME || 'APP_Commit';
+
+  return { login, email, accessToken, repoOwner, repoName };
+}
+
+async function fetchJson(url, init = {}) {
+  const response = await fetch(url, {
+    ...init,
+    headers: {
+      Accept: 'application/json',
+      'User-Agent': 'CommitFlow',
+      ...(init.headers || {}),
+    },
   });
+
+  const contentType = response.headers.get('content-type') || '';
+  const payload = contentType.includes('application/json') ? await response.json() : await response.text();
+
+  if (!response.ok) {
+    const message = typeof payload === 'string' ? payload : payload.message || 'GitHub request failed.';
+    throw new Error(message);
+  }
+
+  return payload;
+}
+
+async function getCurrentUser(req) {
+  const sessionUser = decodeSessionCookie(req);
+  if (sessionUser) {
+    return resolveGitHubIdentity(sessionUser, process.env);
+  }
+
+  return null;
+}
+
+async function getGitHubUserFromToken(accessToken) {
+  const user = await fetchJson('https://api.github.com/user', {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  let email = user.email || null;
+  if (!email) {
+    const emailList = await fetchJson('https://api.github.com/user/emails', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const primary = Array.isArray(emailList)
+      ? emailList.find((entry) => entry.primary && entry.verified) || emailList.find((entry) => entry.verified)
+      : null;
+    email = primary ? primary.email : `${user.login}@users.noreply.github.com`;
+  }
+
+  return { login: user.login, email, accessToken };
+}
+
+async function exchangeCodeForToken(code) {
+  const clientId = process.env.GITHUB_CLIENT_ID;
+  const clientSecret = process.env.GITHUB_CLIENT_SECRET;
+
+  if (!clientId || !clientSecret) {
+    throw new Error('GitHub OAuth is not configured. Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET.');
+  }
+
+  const params = new URLSearchParams({
+    client_id: clientId,
+    client_secret: clientSecret,
+    code,
+  });
+
+  const tokenResponse = await fetchJson(`https://github.com/login/oauth/access_token?${params.toString()}`, {
+    method: 'POST',
+    headers: { Accept: 'application/json' },
+  });
+
+  if (!tokenResponse.access_token) {
+    throw new Error('GitHub OAuth token exchange did not return an access token.');
+  }
+
+  return tokenResponse.access_token;
 }
 
 function getDayName(date) {
@@ -117,36 +211,106 @@ function spreadTimesForDay(date, count) {
   return times;
 }
 
-async function getAuthenticatedUser() {
-  const login = process.env.GITHUB_LOGIN || fallbackUser.login;
-  const email = process.env.GITHUB_EMAIL || fallbackUser.email;
-
-  if (!login) {
-    throw new Error('GitHub user is not configured. Set GITHUB_LOGIN and GITHUB_EMAIL in Vercel environment variables.');
-  }
-
-  return { login, email };
-}
-
-async function ensureRepoReady() {
+async function getFileContent(owner, repo, branch, path, token) {
+  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?ref=${encodeURIComponent(branch)}`;
   try {
-    await execFileAsync('git', ['status'], { cwd: repoRoot });
-    return true;
+    const file = await fetchJson(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return { sha: file.sha, content: Buffer.from(file.content, 'base64').toString('utf8') };
   } catch (error) {
-    return false;
+    if (String(error.message).includes('404')) {
+      return null;
+    }
+    throw error;
   }
 }
 
-async function generateCommits(payload) {
-  const user = await getAuthenticatedUser();
+async function updateFileContent({ owner, repo, branch, path, content, message, author, committer, token, sha }) {
+  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`;
+  const payload = {
+    message,
+    content: Buffer.from(content).toString('base64'),
+    branch,
+    author,
+    committer,
+  };
+  if (sha) payload.sha = sha;
+
+  return fetchJson(url, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload),
+  });
+}
+
+async function createCommitEntry({ user, repoOwner, repoName, branch, commitTime, message, token, commitLogPath, commitCount }) {
+  const path = commitLogPath;
+  const file = await getFileContent(repoOwner, repoName, branch, path, token);
+  let entries = [];
+  if (file && file.content) {
+    try {
+      entries = JSON.parse(file.content);
+    } catch (error) {
+      entries = [];
+    }
+  }
+
+  entries.push({
+    commitNumber: commitCount,
+    date: commitTime.format('YYYY-MM-DD'),
+    time: commitTime.format('HH:mm'),
+    message,
+    author: { name: user.login, email: user.email },
+    branch,
+  });
+
+  const content = JSON.stringify(entries, null, 2) + '\n';
+  const result = await updateFileContent({
+    owner: repoOwner,
+    repo: repoName,
+    branch,
+    path,
+    content,
+    message,
+    author: {
+      name: user.login,
+      email: user.email,
+      date: commitTime.toISOString(),
+    },
+    committer: {
+      name: user.login,
+      email: user.email,
+      date: commitTime.toISOString(),
+    },
+    token,
+    sha: file ? file.sha : undefined,
+  });
+
+  return result;
+}
+
+async function generateCommits(payload, req) {
+  const user = await getCurrentUser(req);
+  if (!user) {
+    throw new Error('GitHub sign-in is required before generating commits.');
+  }
+
   const startDate = payload.startDate;
   const endDate = payload.endDate;
   const dailyCount = Number(payload.dailyCount || 1);
   const pushToRemote = Boolean(payload.pushToRemote);
   const branchName = (payload.branch || 'main').toString().trim() || 'main';
+  const repoOwner = payload.repoOwner?.trim() || user.login;
+  const repoName = payload.repoName?.trim() || 'APP_Commit';
+  const token = user.accessToken;
+
+  if (!token) {
+    throw new Error('GitHub OAuth token is missing. Sign in again and grant repository access.');
+  }
 
   if (!startDate || !endDate) {
-    throw new Error('Please choose a valid start and end date.');
+    throw new Error('Please choose a valid start date and end date.');
   }
 
   if (!Number.isInteger(dailyCount) || dailyCount < 1) {
@@ -160,86 +324,75 @@ async function generateCommits(payload) {
 
   const created = [];
   let totalCount = 0;
+  const commitLogPath = 'commit-log.json';
 
   for (const selectedDate of selectedDates) {
     const countForDay = resolveDailyCount(selectedDate, payload);
     const times = spreadTimesForDay(selectedDate, countForDay);
 
-    for (const time of times) {
-      const message = `Auto commit ${totalCount + 1} — ${time.format('YYYY-MM-DD HH:mm')}`;
+    for (const commitTime of times) {
+      const message = `Auto commit ${totalCount + 1} — ${commitTime.format('YYYY-MM-DD HH:mm')}`;
       const commitNumber = totalCount + 1;
 
-      const env = {
-        ...process.env,
-        GIT_AUTHOR_NAME: user.login,
-        GIT_AUTHOR_EMAIL: user.email,
-        GIT_AUTHOR_DATE: time.toISOString(),
-        GIT_COMMITTER_NAME: user.login,
-        GIT_COMMITTER_EMAIL: user.email,
-        GIT_COMMITTER_DATE: time.toISOString(),
-      };
-
-      try {
-        const repoReady = await ensureRepoReady();
-        if (!repoReady) {
-          throw new Error('Git repository is not available in this deployment environment.');
-        }
-
-        await execFileAsync('git', ['config', 'user.name', user.login], { cwd: repoRoot, env });
-        await execFileAsync('git', ['config', 'user.email', user.email], { cwd: repoRoot, env });
-        await execFileAsync('git', ['add', '.'], { cwd: repoRoot, env });
-        await execFileAsync('git', ['commit', '-m', message, '--allow-empty', '--no-gpg-sign', '--date', time.format()], {
-          cwd: repoRoot,
-          env,
+      if (pushToRemote) {
+        await createCommitEntry({
+          user,
+          repoOwner,
+          repoName,
+          branch: branchName,
+          commitTime,
+          message,
+          token,
+          commitLogPath,
+          commitCount: commitNumber,
         });
-      } catch (error) {
-        if (String(error.message).includes('nothing to commit')) {
-          // This is safe in the Vercel deployment scenario and still counts as a generated activity entry.
-        } else {
-          throw error;
-        }
       }
 
       created.push({
         number: commitNumber,
-        date: time.format('YYYY-MM-DD'),
-        time: time.format('HH:mm'),
+        date: commitTime.format('YYYY-MM-DD'),
+        time: commitTime.format('HH:mm'),
         message,
       });
       totalCount += 1;
     }
   }
 
-  let pushResult = {
-    enabled: false,
-    status: 'not_attempted',
-    message: 'Push was not requested.',
-  };
-
-  if (pushToRemote) {
-    try {
-      if (process.env.GITHUB_TOKEN) {
-        await execFileAsync('git', ['push', 'https://x-access-token:' + process.env.GITHUB_TOKEN + '@github.com/' + (process.env.REPO_OWNER || 'SIMARSINGHRAYAT') + '/' + (process.env.REPO_NAME || 'APP_Commit') + '.git', `HEAD:${branchName}`], { cwd: repoRoot });
-        pushResult = { enabled: true, status: 'success', message: `Pushed to ${branchName}.` };
-      } else {
-        pushResult = { enabled: true, status: 'skipped', message: 'Remote push is configured for deployment with GITHUB_TOKEN.' };
-      }
-    } catch (error) {
-      pushResult = { enabled: true, status: 'failed', message: error.message || 'Remote push failed.' };
-    }
-  }
-
   return {
     success: true,
     branch: branchName,
+    repoOwner,
+    repoName,
     startDate,
     endDate,
     selectedDays: selectedDates.length,
     commitsCreated: totalCount,
     pushToRemote,
-    pushResult,
+    pushResult: {
+      enabled: pushToRemote,
+      status: pushToRemote ? 'success' : 'skipped',
+      message: pushToRemote ? 'Commits created on GitHub.' : 'Remote commit generation was skipped.',
+    },
     created,
   };
+}
+
+function parseBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+    });
+    req.on('end', () => {
+      if (!body) return resolve({});
+      try {
+        resolve(JSON.parse(body));
+      } catch (error) {
+        reject(new Error('Invalid JSON body.'));
+      }
+    });
+    req.on('error', reject);
+  });
 }
 
 export default async function handler(req, res) {
@@ -249,10 +402,15 @@ export default async function handler(req, res) {
   }
 
   const url = new URL(req.url, 'https://example.com');
+  const normalizedPath = url.pathname.replace(/^\/api/, '');
+  console.log('API request', req.method, 'req.url=', req.url, 'pathname=', url.pathname, 'normalized=', normalizedPath);
 
-  if (req.method === 'GET' && url.pathname === '/api/auth/status') {
+  if (req.method === 'GET' && normalizedPath === '/auth/status') {
     try {
-      const user = await getAuthenticatedUser();
+      const user = await getCurrentUser(req);
+      if (!user) {
+        throw new Error('Not authenticated.');
+      }
       sendJson(res, 200, { success: true, user });
     } catch (error) {
       sendJson(res, 401, { success: false, message: error.message });
@@ -260,20 +418,47 @@ export default async function handler(req, res) {
     return;
   }
 
-  if (req.method === 'GET' && url.pathname === '/api/auth/github') {
+  if (req.method === 'GET' && normalizedPath === '/auth/login') {
+    const clientId = process.env.GITHUB_CLIENT_ID;
+    if (!clientId) {
+      sendJson(res, 500, { success: false, message: 'GitHub OAuth is not configured. Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET.' });
+      return;
+    }
+
+    const redirectUri = encodeURIComponent(process.env.APP_BASE_URL || 'http://localhost:3000/api/auth/callback');
+    const loginUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&scope=repo%20read:user%20user:email`;
+    res.writeHead(302, { Location: loginUrl });
+    res.end();
+    return;
+  }
+
+  if (req.method === 'GET' && normalizedPath === '/auth/callback') {
     try {
-      const user = await getAuthenticatedUser();
-      sendJson(res, 200, { success: true, user, message: 'GitHub connected.' });
+      const code = url.searchParams.get('code');
+      if (!code) {
+        throw new Error('GitHub authorization code was not received.');
+      }
+      const accessToken = await exchangeCodeForToken(code);
+      const user = await getGitHubUserFromToken(accessToken);
+      setSessionCookie(res, user);
+      res.writeHead(302, { Location: '/' });
+      res.end();
     } catch (error) {
-      sendJson(res, 401, { success: false, message: 'GitHub sign-in is not configured yet. Add GITHUB_LOGIN and GITHUB_EMAIL to Vercel environment variables.' });
+      sendJson(res, 400, { success: false, message: error.message || 'GitHub login failed.' });
     }
     return;
   }
 
-  if (req.method === 'POST' && url.pathname === '/api/generate') {
+  if (req.method === 'GET' && normalizedPath === '/auth/logout') {
+    res.setHeader('Set-Cookie', 'gh_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
+    sendJson(res, 200, { success: true, message: 'Signed out.' });
+    return;
+  }
+
+  if (req.method === 'POST' && normalizedPath === '/generate') {
     try {
       const payload = await parseBody(req);
-      const result = await generateCommits(payload);
+      const result = await generateCommits(payload, req);
       sendJson(res, 200, result);
     } catch (error) {
       sendJson(res, 400, { success: false, message: error.message || 'Failed to generate the commit schedule.' });

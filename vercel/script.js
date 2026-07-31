@@ -17,44 +17,34 @@ function showScheduler(user) {
 
 async function checkGitHubAuth() {
   try {
-    const response = await fetch("/api/auth/status");
+    const response = await fetch('/api/auth/status');
     const data = await response.json();
 
     if (!response.ok || !data.success) {
-      throw new Error(data.message || "GitHub sign-in is required.");
+      throw new Error(data.message || 'GitHub sign-in is required.');
     }
 
     showScheduler(data.user);
-    authStatus.textContent = "GitHub account connected.";
-    authStatus.classList.add("success");
+    authStatus.textContent = 'GitHub account connected.';
+    authStatus.classList.add('success');
   } catch (error) {
     authStatus.textContent = error.message;
-    authStatus.classList.remove("success");
-    authPanel.classList.remove("hidden");
-    schedulerPanel.classList.add("hidden");
+    authStatus.classList.remove('success');
+    authPanel.classList.remove('hidden');
+    schedulerPanel.classList.add('hidden');
   }
 }
 
-githubLoginBtn.addEventListener("click", async () => {
-  const response = await fetch("/api/auth/github");
-  const data = await response.json();
-
-  if (response.ok && data.success && data.user) {
-    showScheduler(data.user);
-    authStatus.textContent = "GitHub account connected.";
-    authStatus.classList.add("success");
-    return;
-  }
-
-  authStatus.textContent = data.message || "Unable to sign in with GitHub.";
-  authStatus.classList.remove("success");
+githubLoginBtn.addEventListener('click', () => {
+  window.location.href = '/api/auth/login';
 });
 
-signOutBtn.addEventListener("click", () => {
-  authPanel.classList.remove("hidden");
-  schedulerPanel.classList.add("hidden");
-  authStatus.textContent = "Signed out. Connect your GitHub account to continue.";
-  authStatus.classList.remove("success");
+signOutBtn.addEventListener('click', async () => {
+  await fetch('/api/auth/logout');
+  authPanel.classList.remove('hidden');
+  schedulerPanel.classList.add('hidden');
+  authStatus.textContent = 'Signed out. Connect your GitHub account to continue.';
+  authStatus.classList.remove('success');
 });
 
 if (filterMode) {
