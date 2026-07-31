@@ -34,9 +34,9 @@ body {
 }
 
 .page-shell {
-  max-width: 1200px;
+  max-width: 1120px;
   margin: 0 auto;
-  padding: 28px 18px 60px;
+  padding: 28px 22px 56px;
 }
 
 .topbar {
@@ -46,10 +46,10 @@ body {
   gap: 16px;
   margin-bottom: 28px;
   padding: 18px 22px;
-  border: 1px solid var(--grid);
+  border: 1px solid rgba(148, 163, 184, 0.14);
   border-radius: 18px;
-  background: rgba(15, 23, 42, 0.75);
-  backdrop-filter: blur(12px);
+  background: rgba(15, 23, 42, 0.8);
+  backdrop-filter: blur(16px);
 }
 
 .brand-wrap {
@@ -91,6 +91,17 @@ button {
   transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
 
+#signOutBtn {
+  display: none;
+}
+
+button:disabled,
+button[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
 .ghost-button {
   background: rgba(148, 163, 184, 0.12);
   color: var(--text);
@@ -113,38 +124,86 @@ button:hover {
 
 .app-grid {
   display: grid;
-  grid-template-columns: minmax(300px, 480px) minmax(0, 1fr);
+  grid-template-columns: 1fr;
   gap: 24px;
 }
 
 .panel {
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0.82), rgba(15, 23, 42, 0.7));
-  border: 1px solid var(--grid);
-  border-radius: 22px;
-  box-shadow: 0 16px 40px rgba(2, 6, 23, 0.55);
-  padding: 28px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.74));
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 24px;
+  box-shadow: 0 18px 48px rgba(2, 6, 23, 0.45);
+  padding: 32px;
 }
 
 .auth-panel {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 32px;
+  min-height: 480px;
+  text-align: left;
   align-items: center;
-  justify-content: center;
-  min-height: 500px;
-  text-align: center;
 }
 
 .auth-panel h1 {
-  margin: 8px auto 10px;
-  font-size: clamp(2rem, 5vw, 2.8rem);
-  line-height: 1.15;
-  max-width: 420px;
+  margin: 0;
+  font-size: clamp(2.1rem, 4vw, 3.4rem);
+  line-height: 1.05;
+  max-width: 700px;
 }
 
 .auth-panel p {
-  margin: 0 auto 26px;
-  max-width: 380px;
-  line-height: 1.7;
+  margin: 0;
+  max-width: 680px;
+  line-height: 1.75;
   color: var(--muted);
+}
+
+.auth-panel-copy {
+  display: grid;
+  gap: 16px;
+}
+
+.auth-panel-actions {
+  display: grid;
+  gap: 18px;
+  justify-items: start;
+  width: min(100%, 420px);
+}
+
+.hero-copy {
+  display: grid;
+  gap: 22px;
+}
+
+.feature-list {
+  display: grid;
+  gap: 14px;
+}
+
+.feature-item {
+  padding: 18px 20px;
+  border-radius: 18px;
+  background: rgba(110, 231, 249, 0.05);
+  border: 1px solid rgba(110, 231, 249, 0.12);
+}
+
+.feature-item strong {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.feature-item p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.panel-copy {
+  color: var(--muted);
+  margin-bottom: 18px;
+  line-height: 1.75;
 }
 
 .eyebrow {
@@ -158,12 +217,22 @@ button:hover {
 .status {
   min-height: 24px;
   margin-top: 18px;
-  color: var(--danger);
+  padding: 14px 16px;
+  border-radius: 14px;
   font-weight: 600;
+  background: rgba(248, 113, 113, 0.08);
+  border: 1px solid rgba(248, 113, 113, 0.16);
+  color: var(--danger);
 }
 
 .status.success {
   color: var(--success);
+  background: rgba(74, 222, 128, 0.1);
+  border-color: rgba(74, 222, 128, 0.22);
+}
+
+.status.danger {
+  color: var(--danger);
 }
 
 .scheduler-panel {
@@ -216,13 +285,31 @@ input,
 select {
   display: block;
   width: 100%;
-  margin-top: 8px;
-  border-radius: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  background: rgba(15, 23, 42, 0.76);
+  margin-top: 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.92);
   color: var(--text);
-  padding: 12px 14px;
+  padding: 14px 16px;
   font: inherit;
+  min-height: 50px;
+}
+
+input::placeholder {
+  color: rgba(148, 163, 184, 0.8);
+}
+
+.panel-copy {
+  color: var(--muted);
+  margin-bottom: 18px;
+  line-height: 1.75;
+}
+
+input:focus,
+select:focus {
+  outline: none;
+  border-color: rgba(110, 231, 249, 0.8);
+  box-shadow: 0 0 0 4px rgba(110, 231, 249, 0.08);
 }
 
 .checkbox-row {
@@ -260,9 +347,16 @@ select {
 
 .day-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
-  gap: 10px;
-  margin-top: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.day-grid label {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 14px;
+  padding: 14px 12px;
 }
 
 .day-grid label {
@@ -287,21 +381,43 @@ select {
 
 .submit-button {
   width: 100%;
-  margin-top: 8px;
+  margin-top: 18px;
+  padding: 16px 22px;
+  font-size: 1rem;
+}
+
+.page-foot {
+  margin-top: 28px;
+  padding: 22px 28px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.95rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
 }
 
 .result {
-  margin-top: 22px;
-  padding: 18px 20px;
-  border-radius: 14px;
+  margin-top: 24px;
+  padding: 20px 24px;
+  border-radius: 18px;
   border: 1px solid rgba(110, 231, 249, 0.2);
-  background: rgba(15, 23, 42, 0.78);
-  line-height: 1.7;
+  background: rgba(15, 23, 42, 0.85);
+  line-height: 1.8;
   color: var(--text);
 }
 
 .hidden {
   display: none !important;
+}
+
+#signOutBtn {
+  display: none;
+}
+
+button:disabled,
+button[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .progress {
@@ -311,9 +427,21 @@ select {
   color: var(--primary);
 }
 
-@media (max-width: 768px) {
+.status-caption {
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+@media (min-width: 1000px) {
   .app-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(360px, 420px) minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .page-shell {
+    padding: 18px 16px 40px;
   }
 
   .topbar {

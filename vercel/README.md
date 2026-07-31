@@ -12,12 +12,23 @@ This folder is prepared for deployment on Vercel.
 
 Add the following in Vercel:
 
+- GITHUB_CLIENT_ID = your GitHub OAuth app client ID
+- GITHUB_CLIENT_SECRET = your GitHub OAuth app client secret
+- APP_BASE_URL = your deployment URL, e.g. `https://commit-graph-web-app.vercel.app`
 - GITHUB_LOGIN = your GitHub username
 - GITHUB_EMAIL = your GitHub email address
-- Optional for remote pushes:
-  - GITHUB_TOKEN
-  - REPO_OWNER
-  - REPO_NAME
+
+Optional for remote pushes:
+- GITHUB_TOKEN
+- REPO_OWNER
+- REPO_NAME
+
+## GitHub OAuth setup
+
+1. Create a GitHub OAuth app at https://github.com/settings/developers.
+2. Set the "Authorization callback URL" to:
+   `https://<your-vercel-domain>/api/auth/callback`
+3. Copy the client ID and client secret into Vercel.
 
 ## Deploy steps
 

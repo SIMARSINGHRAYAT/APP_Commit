@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GitHub Commit Scheduler</title>
+    <title>CommitFlow | GitHub Commit Scheduler</title>
     <meta
       name="description"
-      content="Professional GitHub commit scheduler with a sign-in flow and date-range automation."
+      content="Professional GitHub commit scheduler with secure OAuth and date-driven automation."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -20,10 +20,10 @@
     <div class="page-shell">
       <header class="topbar">
         <div class="brand-wrap">
-          <div class="brand-mark">GH</div>
+          <div class="brand-mark">CF</div>
           <div>
             <div class="brand-name">CommitFlow</div>
-            <div class="brand-subtitle">GitHub Automation Suite</div>
+            <div class="brand-subtitle">GitHub activity automation</div>
           </div>
         </div>
         <button class="ghost-button" id="signOutBtn" type="button">Sign out</button>
@@ -31,17 +31,36 @@
 
       <main class="app-grid">
         <section class="panel auth-panel" id="authPanel">
-          <div class="eyebrow">Secure access</div>
-          <h1>Sign in to schedule your GitHub activity.</h1>
-          <p>
-            Connect your GitHub account and create controlled daily commits across any selected date range.
-          </p>
+          <div class="hero-copy">
+            <span class="eyebrow">Secure GitHub access</span>
+            <h1>Authorize your repository and schedule commit activity with confidence.</h1>
+            <p>
+              Connect your GitHub account, define your commit cadence, and generate realistic contribution activity safely on a branch you control.
+            </p>
 
-          <button id="githubLoginBtn" class="primary-button" type="button">
-            Continue with GitHub
-          </button>
+            <div class="feature-list">
+              <div class="feature-item">
+                <strong>OAuth protected</strong>
+                <p>Secure sign-in through GitHub with no credentials stored here.</p>
+              </div>
+              <div class="feature-item">
+                <strong>Flexible scheduling</strong>
+                <p>Choose dates, daily counts, filters, and randomness to fit your workflow.</p>
+              </div>
+              <div class="feature-item">
+                <strong>Audit-friendly</strong>
+                <p>Review commit details before pushing to your repository branch.</p>
+              </div>
+            </div>
+          </div>
 
-          <div id="authStatus" class="status" aria-live="polite"></div>
+          <div class="auth-panel-actions">
+            <button id="githubLoginBtn" class="primary-button" type="button">
+              Continue with GitHub
+            </button>
+            <div id="authStatus" class="status" aria-live="polite">Connect your account to begin.</div>
+            <div class="status-caption">GitHub OAuth must be enabled in Vercel before login.</div>
+          </div>
         </section>
 
         <section class="panel scheduler-panel hidden" id="schedulerPanel">
@@ -52,6 +71,10 @@
             </div>
             <span class="status-pill" id="connectionStatus">Connected</span>
           </div>
+
+          <p class="panel-copy">
+            Schedule precise commits, customize day preferences, and optionally push the final branch to your repository.
+          </p>
 
           <form id="commitForm">
             <div class="field-grid two-col">
@@ -148,6 +171,10 @@
           <div id="result" class="result hidden"></div>
         </section>
       </main>
+
+      <footer class="page-foot">
+        <p>CommitFlow is built for professional GitHub automation with secure OAuth and transparent scheduling.</p>
+      </footer>
     </div>
 
     <script src="/script.js"></script>

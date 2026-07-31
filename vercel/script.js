@@ -9,10 +9,44 @@ const resultBox = document.getElementById("result");
 const filterMode = document.getElementById("filterMode");
 const selectedDaysPanel = document.getElementById("selectedDays");
 
-function showScheduler(user) {
-  authPanel.classList.add("hidden");
-  schedulerPanel.classList.remove("hidden");
-  userSummary.textContent = user.login || "GitHub account";
+function setSignedOutState(message) {
+  signOutBtn.style.display = 'none';
+  authPanel.classList.remove('hidden');
+  schedulerPanel.classList.add('hidden');
+  authStatus.textContent = message || 'Connect your GitHub account to continue.';
+  authStatus.classList.remove('success');
+  authStatus.classList.add('danger');
+  githubLoginBtn.disabled = false;
+  githubLoginBtn.textContent = 'Continue with GitHub';
+}
+
+function setSignedInState(user) {
+  signOutBtn.style.display = 'inline-flex';
+  authPanel.classList.add('hidden');
+  schedulerPanel.classList.remove('hidden');
+  userSummary.textContent = user.login || 'GitHub account';
+  authStatus.textContent = 'GitHub account connected.';
+  authStatus.classList.remove('danger');
+  authStatus.classList.add('success');
+}
+
+function showInlineMessage(message, type = 'danger') {
+  authStatus.textContent = message;
+  authStatus.classList.toggle('success', type === 'success');
+  authStatus.classList.toggle('danger', type === 'danger');
+}
+
+async function checkGitHubConfig() {
+  try {
+    const response = await fetch('/api/auth/configured');
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+      return { configured: false, missing: [] };
+    }
+    return { configured: data.configured, missing: data.missing || [] };
+  } catch {
+    return { configured: false, missing: [] };
+  }
 }
 
 async function checkGitHubAuth() {
@@ -24,32 +58,41 @@ async function checkGitHubAuth() {
       throw new Error(data.message || 'GitHub sign-in is required.');
     }
 
-    showScheduler(data.user);
-    authStatus.textContent = 'GitHub account connected.';
-    authStatus.classList.add('success');
+    setSignedInState(data.user);
   } catch (error) {
-    authStatus.textContent = error.message;
-    authStatus.classList.remove('success');
-    authPanel.classList.remove('hidden');
-    schedulerPanel.classList.add('hidden');
+    setSignedOutState(error.message);
   }
 }
 
+async function initializeApp() {
+  const config = await checkGitHubConfig();
+  if (!config.configured) {
+    setSignedOutState('GitHub OAuth missing: ' + (config.missing.length ? config.missing.join(', ') : 'GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET'));
+    githubLoginBtn.disabled = true;
+    githubLoginBtn.textContent = 'Configuration needed';
+    return;
+  }
+
+  await checkGitHubAuth();
+}
+
 githubLoginBtn.addEventListener('click', () => {
+  if (githubLoginBtn.disabled) return;
   window.location.href = '/api/auth/login';
 });
 
 signOutBtn.addEventListener('click', async () => {
-  await fetch('/api/auth/logout');
-  authPanel.classList.remove('hidden');
-  schedulerPanel.classList.add('hidden');
-  authStatus.textContent = 'Signed out. Connect your GitHub account to continue.';
-  authStatus.classList.remove('success');
+  try {
+    await fetch('/api/auth/logout');
+    setSignedOutState('Signed out. Connect your GitHub account to continue.');
+  } catch {
+    showInlineMessage('Unable to sign out at this time.', 'danger');
+  }
 });
 
 if (filterMode) {
-  filterMode.addEventListener("change", () => {
-    selectedDaysPanel.classList.toggle("hidden", filterMode.value !== "selected");
+  filterMode.addEventListener('change', () => {
+    selectedDaysPanel.classList.toggle('hidden', filterMode.value !== 'selected');
   });
 }
 
@@ -61,7 +104,7 @@ function formatETA(seconds) {
 }
 
 function estimateProgress(startAt, totalTasks, completedTasks) {
-  if (completedTasks <= 0) return "Estimating...";
+  if (completedTasks <= 0) return 'Estimating...';
   const elapsedSeconds = (Date.now() - startAt) / 1000;
   const averagePerTask = elapsedSeconds / completedTasks;
   const remaining = Math.max(0, totalTasks - completedTasks);
@@ -69,7 +112,7 @@ function estimateProgress(startAt, totalTasks, completedTasks) {
   return formatETA(eta);
 }
 
-form.addEventListener("submit", async (event) => {
+form.addEventListener('submit', async (event) => {
   event.preventDefault();
 
   const weekdayInputs = document.querySelectorAll("[data-weekday]");
@@ -139,4 +182,4 @@ form.addEventListener("submit", async (event) => {
   }
 });
 
-checkGitHubAuth();
+initializeApp();

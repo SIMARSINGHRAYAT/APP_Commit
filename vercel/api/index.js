@@ -418,14 +418,28 @@ export default async function handler(req, res) {
     return;
   }
 
+  if (req.method === 'GET' && normalizedPath === '/auth/configured') {
+    const configured = Boolean(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET);
+    const missing = [];
+    if (!process.env.GITHUB_CLIENT_ID) missing.push('GITHUB_CLIENT_ID');
+    if (!process.env.GITHUB_CLIENT_SECRET) missing.push('GITHUB_CLIENT_SECRET');
+    sendJson(res, 200, { success: true, configured, missing });
+    return;
+  }
+
   if (req.method === 'GET' && normalizedPath === '/auth/login') {
     const clientId = process.env.GITHUB_CLIENT_ID;
-    if (!clientId) {
-      sendJson(res, 500, { success: false, message: 'GitHub OAuth is not configured. Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET.' });
+    const clientSecret = process.env.GITHUB_CLIENT_SECRET;
+    if (!clientId || !clientSecret) {
+      res.writeHead(500, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><title>GitHub OAuth Not Configured</title><style>body{margin:0;font-family:Inter,sans-serif;background:#081222;color:#e2e8f0;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center;padding:24px;}div{max-width:520px;}a{color:#6ee7f9;text-decoration:none;font-weight:700;}</style></head><body><div><h1>GitHub OAuth is not configured</h1><p>This deployment is missing required GitHub OAuth environment variables. Set <code>GITHUB_CLIENT_ID</code> and <code>GITHUB_CLIENT_SECRET</code> in Vercel to enable login.</p><p><a href="/">Return to the app</a></p></div></body></html>`);
       return;
     }
 
-    const redirectUri = encodeURIComponent(process.env.APP_BASE_URL || 'http://localhost:3000/api/auth/callback');
+    const protocol = req.headers['x-forwarded-proto'] || 'https';
+    const host = req.headers.host || 'localhost:3000';
+    const baseUrl = process.env.APP_BASE_URL || `${protocol}://${host}`;
+    const redirectUri = encodeURIComponent(`${baseUrl}/api/auth/callback`);
     const loginUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&scope=repo%20read:user%20user:email`;
     res.writeHead(302, { Location: loginUrl });
     res.end();
