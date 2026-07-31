@@ -1,11 +1,12 @@
 import http from "http";
 import fs from "fs/promises";
 import path from "path";
+import { fileURLToPath, pathToFileURL } from "url";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import moment from "moment";
 
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = Number(process.env.PORT) || 3200;
 const repoRoot = process.cwd();
 const publicDir = path.join(repoRoot, "public");
 const dataFile = path.join(repoRoot, "data.json");
@@ -37,14 +38,16 @@ async function serveFile(res, filePath) {
 }
 
 function getDayName(date) {
-  return date.format("dddd").toLowerCase();
+  const safeDate = moment.isMoment(date) ? date : moment(date);
+  return safeDate.format("dddd").toLowerCase();
 }
 
-function isDateSelected(date, payload) {
+export function isDateSelected(date, payload) {
+  const safeDate = moment.isMoment(date) ? date : moment(date);
   const mode = payload.filterMode || "all";
   const selectedDays = Array.isArray(payload.selectedDays) ? payload.selectedDays.map((d) => d.toLowerCase()) : [];
-  const dayName = getDayName(date);
-  const dayNumber = date.date();
+  const dayName = getDayName(safeDate);
+  const dayNumber = safeDate.date();
 
   if (mode === "odd") return dayNumber % 2 === 1;
   if (mode === "even") return dayNumber % 2 === 0;
@@ -54,9 +57,10 @@ function isDateSelected(date, payload) {
   return true;
 }
 
-function resolveDailyCount(date, payload) {
+export function resolveDailyCount(date, payload) {
+  const safeDate = moment.isMoment(date) ? date : moment(date);
   const weekdayMap = payload.weekdayCounts || {};
-  const weekdayKey = getDayName(date);
+  const weekdayKey = getDayName(safeDate);
   const baseCount = Number(payload.dailyCount || 1);
 
   if (weekdayMap[weekdayKey] !== undefined && Number(weekdayMap[weekdayKey]) >= 0) {
@@ -72,7 +76,7 @@ function resolveDailyCount(date, payload) {
   return baseCount;
 }
 
-function buildDateWindow(startDate, endDate) {
+export function buildDateWindow(startDate, endDate) {
   const start = moment(startDate, "YYYY-MM-DD");
   const end = moment(endDate, "YYYY-MM-DD");
 
@@ -93,14 +97,29 @@ function buildDateWindow(startDate, endDate) {
   return dates;
 }
 
-async function ensureGitIdentity() {
+async function getGitHubUser() {
   try {
-    await execFileAsync("git", ["config", "user.name"], { cwd: repoRoot });
-    await execFileAsync("git", ["config", "user.email"], { cwd: repoRoot });
-  } catch {
-    await execFileAsync("git", ["config", "user.name", "Auto Commit Bot"], { cwd: repoRoot });
-    await execFileAsync("git", ["config", "user.email", "auto@commit.local"], { cwd: repoRoot });
+    const login = (await execFileAsync("gh", ["api", "user", "--jq", ".login"], { cwd: repoRoot })).stdout.trim();
+    if (!login) {
+      throw new Error("No GitHub login found.");
+    }
+
+    let email = (await execFileAsync("gh", ["api", "user", "--jq", ".email"], { cwd: repoRoot })).stdout.trim();
+    if (!email) {
+      email = `${login}@users.noreply.github.com`;
+    }
+
+    return { login, email };
+  } catch (error) {
+    throw new Error("GitHub sign-in is required before generating commits. Please sign in using gh auth login -h github.com -w.");
   }
+}
+
+async function ensureGitIdentity() {
+  const account = await getGitHubUser();
+  await execFileAsync("git", ["config", "user.name", account.login], { cwd: repoRoot });
+  await execFileAsync("git", ["config", "user.email", account.email], { cwd: repoRoot });
+  return account;
 }
 
 async function ensureGitHubAuth() {
@@ -110,6 +129,7 @@ async function ensureGitHubAuth() {
       throw new Error("The repo remote is not a GitHub URL.");
     }
 
+    await getGitHubUser();
     await execFileAsync("gh", ["auth", "status"], { cwd: repoRoot });
     await execFileAsync("gh", ["auth", "setup-git"], { cwd: repoRoot });
 
@@ -165,7 +185,7 @@ async function generateCommits(payload) {
   const currentBranch = (await execFileAsync("git", ["branch", "--show-current"], { cwd: repoRoot })).stdout.trim() || "main";
   const targetBranch = branchName || currentBranch;
 
-  await ensureGitIdentity();
+  const account = await ensureGitIdentity();
 
   const created = [];
   let totalCommitCount = 0;
@@ -190,21 +210,21 @@ async function generateCommits(payload) {
 
       const env = {
         ...process.env,
-        GIT_AUTHOR_NAME: "Auto Commit Bot",
-        GIT_AUTHOR_EMAIL: "auto@commit.local",
+        GIT_AUTHOR_NAME: account.login,
+        GIT_AUTHOR_EMAIL: account.email,
         GIT_AUTHOR_DATE: isoDate,
-        GIT_COMMITTERMINAL_NAME: "Auto Commit Bot",
-        GIT_COMMITTERMINAL_EMAIL: "auto@commit.local",
-        GIT_COMMITTERMINAL_DATE: isoDate,
+        GIT_COMMITTER_NAME: account.login,
+        GIT_COMMITTER_EMAIL: account.email,
+        GIT_COMMITTER_DATE: isoDate,
       };
 
       await execFileAsync(
         "git",
         [
           "-c",
-          "user.name=Auto Commit Bot",
+          `user.name=${account.login}`,
           "-c",
-          "user.email=auto@commit.local",
+          `user.email=${account.email}`,
           "commit",
           "-m",
           message,
@@ -269,6 +289,15 @@ const server = http.createServer(async (req, res) => {
       return await serveFile(res, path.join(publicDir, "index.html"));
     }
 
+    if (req.method === "GET" && url.pathname === "/auth/github") {
+      try {
+        const user = await getGitHubUser();
+        return sendJson(res, 200, { success: true, user });
+      } catch (error) {
+        return sendJson(res, 401, { success: false, message: error.message || "GitHub sign-in is required." });
+      }
+    }
+
     if (req.method === "GET" && url.pathname === "/styles.css") {
       return await serveFile(res, path.join(publicDir, "styles.css"));
     }
@@ -325,4 +354,7 @@ function startServer(port) {
   });
 }
 
-startServer(PORT);
+const isMainModule = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+if (isMainModule) {
+  startServer(PORT);
+}

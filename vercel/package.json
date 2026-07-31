@@ -1,0 +1,13 @@
+{
+  "name": "app-commit-vercel",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node api/index.js",
+    "start": "node api/index.js",
+    "check": "node --input-type=module -e \"import('./api/index.js').then(m => console.log(typeof m.default)).catch(err => { console.error(err); process.exit(1); })\""
+  },
+  "dependencies": {
+    "moment": "^2.30.1"
+  }
+}

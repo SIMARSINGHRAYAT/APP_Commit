@@ -9,21 +9,15 @@ const resultBox = document.getElementById("result");
 const filterMode = document.getElementById("filterMode");
 const selectedDaysPanel = document.getElementById("selectedDays");
 
-if (filterMode) {
-  filterMode.addEventListener("change", () => {
-    selectedDaysPanel.classList.toggle("hidden", filterMode.value !== "selected");
-  });
-}
-
 function showScheduler(user) {
   authPanel.classList.add("hidden");
   schedulerPanel.classList.remove("hidden");
-  userSummary.textContent = `${user.login} · ${user.email}`;
+  userSummary.textContent = user.login || "GitHub account";
 }
 
 async function checkGitHubAuth() {
   try {
-    const response = await fetch("/auth/github");
+    const response = await fetch("/api/auth/status");
     const data = await response.json();
 
     if (!response.ok || !data.success) {
@@ -41,13 +35,33 @@ async function checkGitHubAuth() {
   }
 }
 
-githubLoginBtn.addEventListener("click", checkGitHubAuth);
+githubLoginBtn.addEventListener("click", async () => {
+  const response = await fetch("/api/auth/github");
+  const data = await response.json();
+
+  if (response.ok && data.success && data.user) {
+    showScheduler(data.user);
+    authStatus.textContent = "GitHub account connected.";
+    authStatus.classList.add("success");
+    return;
+  }
+
+  authStatus.textContent = data.message || "Unable to sign in with GitHub.";
+  authStatus.classList.remove("success");
+});
+
 signOutBtn.addEventListener("click", () => {
   authPanel.classList.remove("hidden");
   schedulerPanel.classList.add("hidden");
-  authStatus.textContent = "Signed out. Connect a GitHub account to continue.";
+  authStatus.textContent = "Signed out. Connect your GitHub account to continue.";
   authStatus.classList.remove("success");
 });
+
+if (filterMode) {
+  filterMode.addEventListener("change", () => {
+    selectedDaysPanel.classList.toggle("hidden", filterMode.value !== "selected");
+  });
+}
 
 function formatETA(seconds) {
   const totalSeconds = Math.max(0, Math.round(seconds));
@@ -107,7 +121,7 @@ form.addEventListener("submit", async (event) => {
   }, 800);
 
   try {
-    const response = await fetch("/generate", {
+    const response = await fetch("/api/generate", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

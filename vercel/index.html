@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GitHub Commit Scheduler</title>
+    <meta
+      name="description"
+      content="Professional GitHub commit scheduler with a sign-in flow and date-range automation."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="topbar">
+        <div class="brand-wrap">
+          <div class="brand-mark">GH</div>
+          <div>
+            <div class="brand-name">CommitFlow</div>
+            <div class="brand-subtitle">GitHub Automation Suite</div>
+          </div>
+        </div>
+        <button class="ghost-button" id="signOutBtn" type="button">Sign out</button>
+      </header>
+
+      <main class="app-grid">
+        <section class="panel auth-panel" id="authPanel">
+          <div class="eyebrow">Secure access</div>
+          <h1>Sign in to schedule your GitHub activity.</h1>
+          <p>
+            Connect your GitHub account and create controlled daily commits across any selected date range.
+          </p>
+
+          <button id="githubLoginBtn" class="primary-button" type="button">
+            Continue with GitHub
+          </button>
+
+          <div id="authStatus" class="status" aria-live="polite"></div>
+        </section>
+
+        <section class="panel scheduler-panel hidden" id="schedulerPanel">
+          <div class="panel-header">
+            <div>
+              <div class="eyebrow">Authenticated</div>
+              <h2 id="userSummary">GitHub account</h2>
+            </div>
+            <span class="status-pill" id="connectionStatus">Connected</span>
+          </div>
+
+          <form id="commitForm">
+            <div class="field-grid two-col">
+              <label>
+                Start date
+                <input type="date" id="startDate" required />
+              </label>
+
+              <label>
+                End date
+                <input type="date" id="endDate" required />
+              </label>
+            </div>
+
+            <div class="field-grid two-col">
+              <label>
+                Daily commits
+                <input type="number" id="dailyCount" min="1" step="1" value="5" required />
+              </label>
+
+              <label>
+                Max random commits per day
+                <input type="number" id="maxPerDay" min="1" step="1" value="5" />
+              </label>
+            </div>
+
+            <div class="panel inner-panel">
+              <h3>Day filter</h3>
+              <select id="filterMode">
+                <option value="all">All days</option>
+                <option value="odd">Odd days</option>
+                <option value="even">Even days</option>
+                <option value="weekends">Weekends only</option>
+                <option value="weekdays">Weekdays only</option>
+                <option value="selected">Selected weekdays</option>
+              </select>
+
+              <div id="selectedDays" class="day-grid hidden">
+                <label><input type="checkbox" value="monday" checked /> Mon</label>
+                <label><input type="checkbox" value="tuesday" checked /> Tue</label>
+                <label><input type="checkbox" value="wednesday" checked /> Wed</label>
+                <label><input type="checkbox" value="thursday" checked /> Thu</label>
+                <label><input type="checkbox" value="friday" checked /> Fri</label>
+                <label><input type="checkbox" value="saturday" /> Sat</label>
+                <label><input type="checkbox" value="sunday" /> Sun</label>
+              </div>
+            </div>
+
+            <div class="panel inner-panel">
+              <h3>Custom weekday counts</h3>
+              <div class="day-grid compact">
+                <label>Mon <input type="number" min="0" step="1" value="5" data-weekday="monday" /></label>
+                <label>Tue <input type="number" min="0" step="1" value="5" data-weekday="tuesday" /></label>
+                <label>Wed <input type="number" min="0" step="1" value="5" data-weekday="wednesday" /></label>
+                <label>Thu <input type="number" min="0" step="1" value="5" data-weekday="thursday" /></label>
+                <label>Fri <input type="number" min="0" step="1" value="5" data-weekday="friday" /></label>
+                <label>Sat <input type="number" min="0" step="1" value="5" data-weekday="saturday" /></label>
+                <label>Sun <input type="number" min="0" step="1" value="5" data-weekday="sunday" /></label>
+              </div>
+            </div>
+
+            <div class="split-controls">
+              <label class="checkbox-row">
+                <input type="checkbox" id="randomize" />
+                Randomize per day
+              </label>
+
+              <label class="checkbox-row">
+                <input type="checkbox" id="pushToRemote" />
+                Push to remote
+              </label>
+            </div>
+
+            <label>
+              Branch name
+              <input type="text" id="branch" value="main" />
+            </label>
+
+            <button type="submit" class="primary-button submit-button">Generate commit schedule</button>
+          </form>
+
+          <div id="result" class="result hidden"></div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/script.js"></script>
+  </body>
+</html>
