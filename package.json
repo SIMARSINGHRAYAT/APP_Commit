@@ -7,7 +7,6 @@
   },
   "scripts": {
     "dev": "npx vercel dev",
-    "build": "echo \"No build step required\"",
     "start": "node api/index.js",
     "check": "node --input-type=module -e \"import('./api/index.js').then(m => console.log(typeof m.default)).catch(err => { console.error(err); process.exit(1); })\""
   },
