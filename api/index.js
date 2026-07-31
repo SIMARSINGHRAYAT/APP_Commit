@@ -285,104 +285,73 @@ function spreadTimesForDay(date, count) {
   return times;
 }
 
-// ─── GitHub Contents API operations (with retry for SHA conflicts) ──────────
+// ─── Git Database API operations (True Backdating) ──────────
 
-async function getFileContent(owner, repo, branch, path, token) {
-  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?ref=${encodeURIComponent(branch)}`;
-  try {
-    const file = await fetchJson(url, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    return { sha: file.sha, content: Buffer.from(file.content, 'base64').toString('utf8') };
-  } catch (error) {
-    if (error.status === 404) {
-      return null;
-    }
-    throw error;
-  }
+async function getBranchRef(owner, repo, branch, token) {
+  const url = `https://api.github.com/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(branch)}`;
+  const data = await fetchJson(url, { headers: { Authorization: `Bearer ${token}` } });
+  return data.object.sha;
 }
 
-async function updateFileContent({ owner, repo, branch, path, content, message, author, committer, token, sha }) {
-  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`;
+async function getCommit(owner, repo, commitSha, token) {
+  const url = `https://api.github.com/repos/${owner}/${repo}/git/commits/${commitSha}`;
+  return fetchJson(url, { headers: { Authorization: `Bearer ${token}` } });
+}
+
+async function createBlob(owner, repo, content, token) {
+  const url = `https://api.github.com/repos/${owner}/${repo}/git/blobs`;
+  const data = await fetchJson(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ content, encoding: 'utf-8' }),
+  });
+  return data.sha;
+}
+
+async function createTree(owner, repo, baseTreeSha, path, blobSha, token) {
+  const url = `https://api.github.com/repos/${owner}/${repo}/git/trees`;
+  const data = await fetchJson(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      base_tree: baseTreeSha,
+      tree: [
+        {
+          path,
+          mode: '100644',
+          type: 'blob',
+          sha: blobSha,
+        },
+      ],
+    }),
+  });
+  return data.sha;
+}
+
+async function createGitCommit({ owner, repo, message, treeSha, parentSha, author, token }) {
+  const url = `https://api.github.com/repos/${owner}/${repo}/git/commits`;
   const payload = {
     message,
-    content: Buffer.from(content).toString('base64'),
-    branch,
+    tree: treeSha,
+    parents: [parentSha],
     author,
-    committer,
+    committer: author,
   };
-  if (sha) payload.sha = sha;
-
-  return fetchJson(url, {
-    method: 'PUT',
+  const data = await fetchJson(url, {
+    method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     body: JSON.stringify(payload),
   });
+  return data.sha;
 }
 
-const MAX_RETRIES = 3;
-const RETRY_DELAY_MS = 600;
-
-async function createCommitEntry({ user, repoOwner, repoName, branch, commitTime, message, token, commitLogPath, commitCount }) {
-  let lastError = null;
-
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    try {
-      const path = commitLogPath;
-      const file = await getFileContent(repoOwner, repoName, branch, path, token);
-      let entries = [];
-      if (file && file.content) {
-        try {
-          entries = JSON.parse(file.content);
-        } catch (parseErr) {
-          entries = [];
-        }
-      }
-
-      entries.push({
-        commitNumber: commitCount,
-        date: commitTime.format('YYYY-MM-DD'),
-        time: commitTime.format('HH:mm'),
-        message,
-        author: { name: user.login, email: user.email },
-        branch,
-      });
-
-      const content = JSON.stringify(entries, null, 2) + '\n';
-      const result = await updateFileContent({
-        owner: repoOwner,
-        repo: repoName,
-        branch,
-        path,
-        content,
-        message,
-        author: {
-          name: user.login,
-          email: user.email,
-          date: commitTime.toISOString(),
-        },
-        committer: {
-          name: user.login,
-          email: user.email,
-          date: commitTime.toISOString(),
-        },
-        token,
-        sha: file ? file.sha : undefined,
-      });
-
-      return result;
-    } catch (error) {
-      lastError = error;
-      // Retry on 409 Conflict (SHA mismatch from rapid writes)
-      if (error.status === 409 && attempt < MAX_RETRIES - 1) {
-        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS * (attempt + 1)));
-        continue;
-      }
-      throw error;
-    }
-  }
-
-  throw lastError;
+async function updateBranchRef(owner, repo, branch, commitSha, token) {
+  const url = `https://api.github.com/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(branch)}`;
+  await fetchJson(url, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ sha: commitSha, force: false }),
+  });
 }
 
 // ─── Core commit generation ─────────────────────────────────────────────────
@@ -436,6 +405,26 @@ async function generateCommits(payload, req) {
   let totalCount = 0;
   const commitLogPath = 'commit-log.json';
 
+  let currentCommitSha = null;
+  let currentTreeSha = null;
+  let currentLogEntries = [];
+
+  if (pushToRemote) {
+    currentCommitSha = await getBranchRef(repoOwner, repoName, branchName, token);
+    const commitData = await getCommit(repoOwner, repoName, currentCommitSha, token);
+    currentTreeSha = commitData.tree.sha;
+
+    // Try to fetch existing log file to append to it
+    try {
+      const fileUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/contents/${encodeURIComponent(commitLogPath)}?ref=${encodeURIComponent(branchName)}`;
+      const file = await fetchJson(fileUrl, { headers: { Authorization: `Bearer ${token}` } });
+      const content = Buffer.from(file.content, 'base64').toString('utf8');
+      currentLogEntries = JSON.parse(content);
+    } catch (e) {
+      currentLogEntries = []; // File doesn't exist or is invalid
+    }
+  }
+
   for (const selectedDate of selectedDates) {
     const countForDay = resolveDailyCount(selectedDate, payload);
     const times = spreadTimesForDay(selectedDate, countForDay);
@@ -445,16 +434,33 @@ async function generateCommits(payload, req) {
       const message = `Auto commit ${totalCount} — ${commitTime.format('YYYY-MM-DD HH:mm')}`;
 
       if (pushToRemote) {
-        await createCommitEntry({
-          user,
-          repoOwner,
-          repoName,
-          branch: branchName,
-          commitTime,
+        currentLogEntries.push({
+          commitNumber: totalCount,
+          date: commitTime.format('YYYY-MM-DD'),
+          time: commitTime.format('HH:mm'),
           message,
-          token,
-          commitLogPath,
-          commitCount: totalCount,
+          author: { name: user.login, email: user.email },
+          branch: branchName,
+        });
+        const content = JSON.stringify(currentLogEntries, null, 2) + '\n';
+
+        const blobSha = await createBlob(repoOwner, repoName, content, token);
+        currentTreeSha = await createTree(repoOwner, repoName, currentTreeSha, commitLogPath, blobSha, token);
+        
+        const authorInfo = {
+          name: user.login,
+          email: user.email,
+          date: commitTime.toISOString()
+        };
+        
+        currentCommitSha = await createGitCommit({
+          owner: repoOwner,
+          repo: repoName,
+          message,
+          treeSha: currentTreeSha,
+          parentSha: currentCommitSha,
+          author: authorInfo,
+          token
         });
       }
 
@@ -465,6 +471,10 @@ async function generateCommits(payload, req) {
         message,
       });
     }
+  }
+
+  if (pushToRemote && totalCount > 0) {
+    await updateBranchRef(repoOwner, repoName, branchName, currentCommitSha, token);
   }
 
   return {
