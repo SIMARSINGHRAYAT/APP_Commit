@@ -1,9 +1,5 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import moment from 'moment';
 
-const execFileAsync = promisify(execFile);
-const repoRoot = process.cwd();
 const defaultResponseHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -59,6 +55,8 @@ function resolveGitHubIdentity(user = {}, env = process.env) {
   return { login, email, accessToken, repoOwner, repoName };
 }
 
+// ─── Enhanced fetch with contextual error messages ──────────────────────────
+
 async function fetchJson(url, init = {}) {
   const response = await fetch(url, {
     ...init,
@@ -73,19 +71,31 @@ async function fetchJson(url, init = {}) {
   const payload = contentType.includes('application/json') ? await response.json() : await response.text();
 
   if (!response.ok) {
-    const message = typeof payload === 'string' ? payload : payload.message || 'GitHub request failed.';
-    throw new Error(message);
+    const detail = typeof payload === 'string' ? payload : payload.message || '';
+    const urlPath = new URL(url).pathname;
+    const statusText = response.status === 404
+      ? `Not found: ${urlPath}`
+      : response.status === 422
+        ? `Validation failed for ${urlPath}: ${detail}`
+        : response.status === 409
+          ? `Conflict (SHA mismatch) on ${urlPath}: ${detail}`
+          : `GitHub API error ${response.status} on ${urlPath}: ${detail}`;
+    const error = new Error(statusText);
+    error.status = response.status;
+    error.detail = detail;
+    throw error;
   }
 
   return payload;
 }
+
+// ─── Auth helpers ───────────────────────────────────────────────────────────
 
 async function getCurrentUser(req) {
   const sessionUser = decodeSessionCookie(req);
   if (sessionUser) {
     return resolveGitHubIdentity(sessionUser, process.env);
   }
-
   return null;
 }
 
@@ -133,6 +143,70 @@ async function exchangeCodeForToken(code) {
 
   return tokenResponse.access_token;
 }
+
+// ─── Repository & branch validation ────────────────────────────────────────
+
+async function validateRepo(owner, repo, token) {
+  try {
+    const repoData = await fetchJson(`https://api.github.com/repos/${owner}/${repo}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return {
+      exists: true,
+      fullName: repoData.full_name,
+      defaultBranch: repoData.default_branch,
+      permissions: repoData.permissions || {},
+      private: repoData.private,
+    };
+  } catch (error) {
+    if (error.status === 404) {
+      return { exists: false, message: `Repository "${owner}/${repo}" was not found. Check the owner and name, or make sure your GitHub token has access to it.` };
+    }
+    if (error.status === 403) {
+      return { exists: false, message: `Access denied to "${owner}/${repo}". Your GitHub token may lack the required permissions.` };
+    }
+    throw error;
+  }
+}
+
+async function ensureBranchExists(owner, repo, branch, token) {
+  // Check if the branch already exists
+  try {
+    const ref = await fetchJson(`https://api.github.com/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(branch)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return { exists: true, sha: ref.object.sha };
+  } catch (error) {
+    if (error.status !== 404) throw error;
+  }
+
+  // Branch doesn't exist — try to create it from the default branch
+  try {
+    const repoData = await fetchJson(`https://api.github.com/repos/${owner}/${repo}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const defaultBranch = repoData.default_branch || 'main';
+
+    const defaultRef = await fetchJson(`https://api.github.com/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(defaultBranch)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    const newRef = await fetchJson(`https://api.github.com/repos/${owner}/${repo}/git/refs`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        ref: `refs/heads/${branch}`,
+        sha: defaultRef.object.sha,
+      }),
+    });
+
+    return { exists: true, created: true, sha: newRef.object.sha };
+  } catch (createError) {
+    throw new Error(`Branch "${branch}" does not exist and could not be created: ${createError.message}`);
+  }
+}
+
+// ─── Date/time helpers ──────────────────────────────────────────────────────
 
 function getDayName(date) {
   const value = moment.isMoment(date) ? date : moment(date);
@@ -211,6 +285,8 @@ function spreadTimesForDay(date, count) {
   return times;
 }
 
+// ─── GitHub Contents API operations (with retry for SHA conflicts) ──────────
+
 async function getFileContent(owner, repo, branch, path, token) {
   const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?ref=${encodeURIComponent(branch)}`;
   try {
@@ -219,7 +295,7 @@ async function getFileContent(owner, repo, branch, path, token) {
     });
     return { sha: file.sha, content: Buffer.from(file.content, 'base64').toString('utf8') };
   } catch (error) {
-    if (String(error.message).includes('404')) {
+    if (error.status === 404) {
       return null;
     }
     throw error;
@@ -244,51 +320,72 @@ async function updateFileContent({ owner, repo, branch, path, content, message, 
   });
 }
 
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 600;
+
 async function createCommitEntry({ user, repoOwner, repoName, branch, commitTime, message, token, commitLogPath, commitCount }) {
-  const path = commitLogPath;
-  const file = await getFileContent(repoOwner, repoName, branch, path, token);
-  let entries = [];
-  if (file && file.content) {
+  let lastError = null;
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      entries = JSON.parse(file.content);
+      const path = commitLogPath;
+      const file = await getFileContent(repoOwner, repoName, branch, path, token);
+      let entries = [];
+      if (file && file.content) {
+        try {
+          entries = JSON.parse(file.content);
+        } catch (parseErr) {
+          entries = [];
+        }
+      }
+
+      entries.push({
+        commitNumber: commitCount,
+        date: commitTime.format('YYYY-MM-DD'),
+        time: commitTime.format('HH:mm'),
+        message,
+        author: { name: user.login, email: user.email },
+        branch,
+      });
+
+      const content = JSON.stringify(entries, null, 2) + '\n';
+      const result = await updateFileContent({
+        owner: repoOwner,
+        repo: repoName,
+        branch,
+        path,
+        content,
+        message,
+        author: {
+          name: user.login,
+          email: user.email,
+          date: commitTime.toISOString(),
+        },
+        committer: {
+          name: user.login,
+          email: user.email,
+          date: commitTime.toISOString(),
+        },
+        token,
+        sha: file ? file.sha : undefined,
+      });
+
+      return result;
     } catch (error) {
-      entries = [];
+      lastError = error;
+      // Retry on 409 Conflict (SHA mismatch from rapid writes)
+      if (error.status === 409 && attempt < MAX_RETRIES - 1) {
+        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS * (attempt + 1)));
+        continue;
+      }
+      throw error;
     }
   }
 
-  entries.push({
-    commitNumber: commitCount,
-    date: commitTime.format('YYYY-MM-DD'),
-    time: commitTime.format('HH:mm'),
-    message,
-    author: { name: user.login, email: user.email },
-    branch,
-  });
-
-  const content = JSON.stringify(entries, null, 2) + '\n';
-  const result = await updateFileContent({
-    owner: repoOwner,
-    repo: repoName,
-    branch,
-    path,
-    content,
-    message,
-    author: {
-      name: user.login,
-      email: user.email,
-      date: commitTime.toISOString(),
-    },
-    committer: {
-      name: user.login,
-      email: user.email,
-      date: commitTime.toISOString(),
-    },
-    token,
-    sha: file ? file.sha : undefined,
-  });
-
-  return result;
+  throw lastError;
 }
+
+// ─── Core commit generation ─────────────────────────────────────────────────
 
 async function generateCommits(payload, req) {
   const user = await getCurrentUser(req);
@@ -301,8 +398,8 @@ async function generateCommits(payload, req) {
   const dailyCount = Number(payload.dailyCount || 1);
   const pushToRemote = Boolean(payload.pushToRemote);
   const branchName = (payload.branch || 'main').toString().trim() || 'main';
-  const repoOwner = payload.repoOwner?.trim() || user.login;
-  const repoName = payload.repoName?.trim() || 'APP_Commit';
+  const repoOwner = payload.repoOwner?.trim() || user.repoOwner || user.login;
+  const repoName = payload.repoName?.trim() || user.repoName || 'APP_Commit';
   const token = user.accessToken;
 
   if (!token) {
@@ -315,6 +412,19 @@ async function generateCommits(payload, req) {
 
   if (!Number.isInteger(dailyCount) || dailyCount < 1) {
     throw new Error('Daily commit count must be a whole number greater than zero.');
+  }
+
+  // ── Validate repo & branch before starting ────────────────────────────
+  if (pushToRemote) {
+    const repoCheck = await validateRepo(repoOwner, repoName, token);
+    if (!repoCheck.exists) {
+      throw new Error(repoCheck.message);
+    }
+    if (repoCheck.permissions && !repoCheck.permissions.push) {
+      throw new Error(`You don't have write access to "${repoOwner}/${repoName}". Make sure you are a collaborator or owner.`);
+    }
+
+    await ensureBranchExists(repoOwner, repoName, branchName, token);
   }
 
   const selectedDates = buildDateWindow(startDate, endDate).filter((date) => isDateSelected(date, payload));
@@ -331,8 +441,8 @@ async function generateCommits(payload, req) {
     const times = spreadTimesForDay(selectedDate, countForDay);
 
     for (const commitTime of times) {
-      const message = `Auto commit ${totalCount + 1} — ${commitTime.format('YYYY-MM-DD HH:mm')}`;
-      const commitNumber = totalCount + 1;
+      totalCount += 1;
+      const message = `Auto commit ${totalCount} — ${commitTime.format('YYYY-MM-DD HH:mm')}`;
 
       if (pushToRemote) {
         await createCommitEntry({
@@ -344,17 +454,16 @@ async function generateCommits(payload, req) {
           message,
           token,
           commitLogPath,
-          commitCount: commitNumber,
+          commitCount: totalCount,
         });
       }
 
       created.push({
-        number: commitNumber,
+        number: totalCount,
         date: commitTime.format('YYYY-MM-DD'),
         time: commitTime.format('HH:mm'),
         message,
       });
-      totalCount += 1;
     }
   }
 
@@ -371,11 +480,15 @@ async function generateCommits(payload, req) {
     pushResult: {
       enabled: pushToRemote,
       status: pushToRemote ? 'success' : 'skipped',
-      message: pushToRemote ? 'Commits created on GitHub.' : 'Remote commit generation was skipped.',
+      message: pushToRemote
+        ? `${totalCount} commit(s) successfully created on ${repoOwner}/${repoName} (${branchName}).`
+        : 'Dry-run mode — no commits were pushed to GitHub. Enable "Push to remote" to create real commits.',
     },
     created,
   };
 }
+
+// ─── Body parser ────────────────────────────────────────────────────────────
 
 function parseBody(req) {
   return new Promise((resolve, reject) => {
@@ -395,6 +508,8 @@ function parseBody(req) {
   });
 }
 
+// ─── Request handler ────────────────────────────────────────────────────────
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     sendJson(res, 200, { success: true });
@@ -404,6 +519,8 @@ export default async function handler(req, res) {
   const url = new URL(req.url, 'https://example.com');
   const normalizedPath = url.pathname.replace(/^\/api/, '');
   console.log('API request', req.method, 'req.url=', req.url, 'pathname=', url.pathname, 'normalized=', normalizedPath);
+
+  // ── Auth routes ─────────────────────────────────────────────────────────
 
   if (req.method === 'GET' && normalizedPath === '/auth/status') {
     try {
@@ -469,13 +586,83 @@ export default async function handler(req, res) {
     return;
   }
 
+  // ── Repo validation endpoint ────────────────────────────────────────────
+
+  if (req.method === 'POST' && normalizedPath === '/validate-repo') {
+    try {
+      const user = await getCurrentUser(req);
+      if (!user || !user.accessToken) {
+        sendJson(res, 401, { success: false, message: 'Sign in first.' });
+        return;
+      }
+      const payload = await parseBody(req);
+      const owner = payload.repoOwner?.trim() || user.login;
+      const repo = payload.repoName?.trim();
+
+      if (!repo) {
+        sendJson(res, 400, { success: false, message: 'Repository name is required.' });
+        return;
+      }
+
+      const repoCheck = await validateRepo(owner, repo, user.accessToken);
+      if (!repoCheck.exists) {
+        sendJson(res, 200, { success: true, valid: false, message: repoCheck.message });
+        return;
+      }
+
+      sendJson(res, 200, {
+        success: true,
+        valid: true,
+        fullName: repoCheck.fullName,
+        defaultBranch: repoCheck.defaultBranch,
+        canPush: Boolean(repoCheck.permissions.push),
+        private: repoCheck.private,
+      });
+    } catch (error) {
+      sendJson(res, 500, { success: false, message: error.message });
+    }
+    return;
+  }
+
+  // ── List user repos endpoint ────────────────────────────────────────────
+
+  if (req.method === 'GET' && normalizedPath === '/repos') {
+    try {
+      const user = await getCurrentUser(req);
+      if (!user || !user.accessToken) {
+        sendJson(res, 401, { success: false, message: 'Sign in first.' });
+        return;
+      }
+
+      const repos = await fetchJson('https://api.github.com/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator', {
+        headers: { Authorization: `Bearer ${user.accessToken}` },
+      });
+
+      const repoList = repos.map((r) => ({
+        fullName: r.full_name,
+        name: r.name,
+        owner: r.owner.login,
+        defaultBranch: r.default_branch,
+        private: r.private,
+      }));
+
+      sendJson(res, 200, { success: true, repos: repoList });
+    } catch (error) {
+      sendJson(res, 500, { success: false, message: error.message });
+    }
+    return;
+  }
+
+  // ── Commit generation ───────────────────────────────────────────────────
+
   if (req.method === 'POST' && normalizedPath === '/generate') {
     try {
       const payload = await parseBody(req);
       const result = await generateCommits(payload, req);
       sendJson(res, 200, result);
     } catch (error) {
-      sendJson(res, 400, { success: false, message: error.message || 'Failed to generate the commit schedule.' });
+      const statusCode = error.status || 400;
+      sendJson(res, statusCode, { success: false, message: error.message || 'Failed to generate the commit schedule.' });
     }
     return;
   }

@@ -8,8 +8,14 @@ const form = document.getElementById("commitForm");
 const resultBox = document.getElementById("result");
 const filterMode = document.getElementById("filterMode");
 const selectedDaysPanel = document.getElementById("selectedDays");
+const repoOwnerInput = document.getElementById("repoOwner");
+const repoNameInput = document.getElementById("repoName");
+const submitBtn = form.querySelector("button[type='submit']");
+
+let currentUser = null;
 
 function setSignedOutState(message) {
+  currentUser = null;
   signOutBtn.style.display = 'none';
   authPanel.classList.remove('hidden');
   schedulerPanel.classList.add('hidden');
@@ -21,6 +27,7 @@ function setSignedOutState(message) {
 }
 
 function setSignedInState(user) {
+  currentUser = user;
   signOutBtn.style.display = 'inline-flex';
   authPanel.classList.add('hidden');
   schedulerPanel.classList.remove('hidden');
@@ -28,6 +35,12 @@ function setSignedInState(user) {
   authStatus.textContent = 'GitHub account connected.';
   authStatus.classList.remove('danger');
   authStatus.classList.add('success');
+
+  // Auto-fill repo owner from the authenticated user
+  if (repoOwnerInput && !repoOwnerInput.value) {
+    repoOwnerInput.value = user.login || '';
+    repoOwnerInput.placeholder = user.login || 'your GitHub username';
+  }
 }
 
 function showInlineMessage(message, type = 'danger') {
@@ -112,6 +125,83 @@ function estimateProgress(startAt, totalTasks, completedTasks) {
   return formatETA(eta);
 }
 
+// ─── Pre-submit repo validation ─────────────────────────────────────────────
+
+async function validateRepoBeforeSubmit(repoOwner, repoName) {
+  try {
+    const response = await fetch('/api/validate-repo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repoOwner, repoName }),
+    });
+    const data = await response.json();
+
+    if (!response.ok || !data.success) {
+      return { valid: false, message: data.message || 'Unable to validate repository.' };
+    }
+
+    if (!data.valid) {
+      return { valid: false, message: data.message };
+    }
+
+    if (!data.canPush) {
+      return { valid: false, message: `You don't have write access to "${repoOwner}/${repoName}".` };
+    }
+
+    return { valid: true, defaultBranch: data.defaultBranch };
+  } catch (error) {
+    return { valid: false, message: 'Unable to validate repository. Check your connection and try again.' };
+  }
+}
+
+// ─── Form submission ────────────────────────────────────────────────────────
+
+function setSubmitting(isSubmitting) {
+  if (submitBtn) {
+    submitBtn.disabled = isSubmitting;
+    submitBtn.textContent = isSubmitting ? 'Generating...' : 'Generate commit schedule';
+  }
+}
+
+function renderError(message) {
+  resultBox.classList.remove('hidden');
+  resultBox.className = 'result result-error';
+  resultBox.innerHTML = `
+    <div class="result-icon">✕</div>
+    <div class="result-body">
+      <strong>Error</strong>
+      <p>${escapeHtml(message)}</p>
+    </div>
+  `;
+}
+
+function renderSuccess(data) {
+  resultBox.classList.remove('hidden');
+  resultBox.className = 'result result-success';
+  const pushNote = data.pushResult?.message || '';
+  resultBox.innerHTML = `
+    <div class="result-icon">✓</div>
+    <div class="result-body">
+      <strong>Success!</strong>
+      <div class="result-stats">
+        <div class="stat"><span class="stat-label">Repository</span><span class="stat-value">${escapeHtml(data.repoOwner)}/${escapeHtml(data.repoName)}</span></div>
+        <div class="stat"><span class="stat-label">Branch</span><span class="stat-value">${escapeHtml(data.branch)}</span></div>
+        <div class="stat"><span class="stat-label">Commits created</span><span class="stat-value">${data.commitsCreated}</span></div>
+        <div class="stat"><span class="stat-label">Date range</span><span class="stat-value">${escapeHtml(data.startDate)} → ${escapeHtml(data.endDate)}</span></div>
+        <div class="stat"><span class="stat-label">Selected days</span><span class="stat-value">${data.selectedDays}</span></div>
+        <div class="stat"><span class="stat-label">Pushed to remote</span><span class="stat-value">${data.pushToRemote ? 'Yes' : 'No (dry-run)'}</span></div>
+      </div>
+      <p class="result-note">${escapeHtml(pushNote)}</p>
+    </div>
+  `;
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str || '';
+  return div.innerHTML;
+}
+
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
 
@@ -123,6 +213,10 @@ form.addEventListener('submit', async (event) => {
 
   const selectedDays = Array.from(document.querySelectorAll("#selectedDays input:checked")).map((input) => input.value);
 
+  const repoOwner = repoOwnerInput.value.trim() || (currentUser ? currentUser.login : '');
+  const repoName = repoNameInput.value.trim();
+  const pushToRemote = document.getElementById("pushToRemote").checked;
+
   const payload = {
     startDate: document.getElementById("startDate").value,
     endDate: document.getElementById("endDate").value,
@@ -133,8 +227,37 @@ form.addEventListener('submit', async (event) => {
     selectedDays,
     weekdayCounts,
     branch: document.getElementById("branch").value,
-    pushToRemote: document.getElementById("pushToRemote").checked,
+    pushToRemote,
+    repoOwner,
+    repoName,
   };
+
+  // Validate inputs
+  if (!payload.startDate || !payload.endDate) {
+    renderError('Please select both a start date and an end date.');
+    return;
+  }
+
+  if (pushToRemote && !repoName) {
+    renderError('Repository name is required when pushing to remote. Enter a repository name.');
+    return;
+  }
+
+  setSubmitting(true);
+
+  // Pre-validate repo if pushing to remote
+  if (pushToRemote) {
+    resultBox.classList.remove('hidden');
+    resultBox.className = 'result';
+    resultBox.innerHTML = 'Validating repository access...';
+
+    const validation = await validateRepoBeforeSubmit(repoOwner, repoName);
+    if (!validation.valid) {
+      setSubmitting(false);
+      renderError(validation.message);
+      return;
+    }
+  }
 
   const start = new Date(payload.startDate);
   const end = new Date(payload.endDate);
@@ -143,8 +266,9 @@ form.addEventListener('submit', async (event) => {
   const startedAt = Date.now();
   let completed = 0;
 
-  resultBox.classList.remove("hidden");
-  resultBox.innerHTML = "Generating commits... <span class='progress'>0/0 · Estimating...</span>";
+  resultBox.classList.remove('hidden');
+  resultBox.className = 'result';
+  resultBox.innerHTML = "Generating commits... <span class='progress'>0/" + estimatedTotal + " · Estimating...</span>";
 
   const progressTimer = setInterval(() => {
     completed = Math.min(completed + 1, estimatedTotal);
@@ -168,17 +292,12 @@ form.addEventListener('submit', async (event) => {
     }
 
     clearInterval(progressTimer);
-    resultBox.innerHTML = `
-      <strong>Success!</strong><br>
-      Branch: ${data.branch}<br>
-      Commits created: ${data.commitsCreated}<br>
-      Date range: ${data.startDate} → ${data.endDate}<br>
-      Selected days: ${data.selectedDays}<br>
-      Push enabled: ${data.pushToRemote ? "Yes" : "No"}
-    `;
+    renderSuccess(data);
   } catch (error) {
     clearInterval(progressTimer);
-    resultBox.innerHTML = `<strong>Error:</strong> ${error.message}`;
+    renderError(error.message);
+  } finally {
+    setSubmitting(false);
   }
 });
 

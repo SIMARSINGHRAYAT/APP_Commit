@@ -109,7 +109,7 @@
 
               <label>
                 Repo name
-                <input type="text" id="repoName" placeholder="repository-name" />
+                <input type="text" id="repoName" placeholder="e.g. my-repo" required />
               </label>
             </div>
 
@@ -155,9 +155,10 @@
               </label>
 
               <label class="checkbox-row">
-                <input type="checkbox" id="pushToRemote" />
+                <input type="checkbox" id="pushToRemote" checked />
                 Push to remote
               </label>
+              <span class="push-hint">Uncheck for a dry-run preview only</span>
             </div>
 
             <label>

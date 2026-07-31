@@ -397,12 +397,111 @@ select:focus {
 
 .result {
   margin-top: 24px;
-  padding: 20px 24px;
+  padding: 22px 24px;
   border-radius: 18px;
   border: 1px solid rgba(110, 231, 249, 0.2);
   background: rgba(15, 23, 42, 0.85);
   line-height: 1.8;
   color: var(--text);
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  animation: resultSlideIn 0.35s ease-out;
+}
+
+@keyframes resultSlideIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.result-success {
+  border-color: rgba(74, 222, 128, 0.35);
+  background: rgba(15, 30, 20, 0.85);
+}
+
+.result-error {
+  border-color: rgba(248, 113, 113, 0.35);
+  background: rgba(30, 15, 15, 0.85);
+}
+
+.result-icon {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+
+.result-success .result-icon {
+  background: rgba(74, 222, 128, 0.15);
+  color: var(--success);
+}
+
+.result-error .result-icon {
+  background: rgba(248, 113, 113, 0.15);
+  color: var(--danger);
+}
+
+.result-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.result-body strong {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 1.05rem;
+}
+
+.result-body p {
+  margin: 0;
+  line-height: 1.65;
+  color: var(--muted);
+}
+
+.result-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.stat-label {
+  font-size: 0.73rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.stat-value {
+  font-weight: 700;
+  color: var(--text);
+  margin-top: 2px;
+}
+
+.result-note {
+  margin-top: 12px !important;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.push-hint {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-left: 4px;
 }
 
 .hidden {
