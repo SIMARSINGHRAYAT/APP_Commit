@@ -7,13 +7,20 @@ filterMode.addEventListener("change", () => {
   selectedDaysPanel.classList.toggle("hidden", filterMode.value !== "selected");
 });
 
-function updateProgress(startTime, total, completed) {
-  const elapsed = (Date.now() - startTime) / 1000;
-  const remaining = Math.max(0, total - completed);
-  const estimatedSeconds = elapsed > 0 ? Math.max(1, (elapsed / Math.max(1, completed)) * remaining) : 0;
-  const minutes = Math.floor(estimatedSeconds / 60);
-  const seconds = Math.round(estimatedSeconds % 60);
-  return `${minutes}m ${seconds}s remaining`;
+function formatETA(seconds) {
+  const totalSeconds = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(totalSeconds / 60);
+  const secondsLeft = totalSeconds % 60;
+  return `${minutes}m ${secondsLeft}s remaining`;
+}
+
+function estimateProgress(startAt, totalTasks, completedTasks) {
+  if (completedTasks <= 0) return "Estimating...";
+  const elapsedSeconds = (Date.now() - startAt) / 1000;
+  const averagePerTask = elapsedSeconds / completedTasks;
+  const remaining = Math.max(0, totalTasks - completedTasks);
+  const eta = averagePerTask * remaining;
+  return formatETA(eta);
 }
 
 form.addEventListener("submit", async (event) => {
@@ -30,8 +37,8 @@ form.addEventListener("submit", async (event) => {
   const payload = {
     startDate: document.getElementById("startDate").value,
     endDate: document.getElementById("endDate").value,
-    dailyCount: document.getElementById("dailyCount").value,
-    maxPerDay: document.getElementById("maxPerDay").value,
+    dailyCount: Number(document.getElementById("dailyCount").value || 1),
+    maxPerDay: Number(document.getElementById("maxPerDay").value || 1),
     randomize: document.getElementById("randomize").checked,
     filterMode: filterMode.value,
     selectedDays,
@@ -40,17 +47,19 @@ form.addEventListener("submit", async (event) => {
     pushToRemote: document.getElementById("pushToRemote").checked,
   };
 
-  resultBox.classList.remove("hidden");
-  resultBox.innerHTML = "Generating commits... <span class='progress'>Estimating...</span>";
-
-  const startTime = Date.now();
+  const estimatedTotal = Math.max(1, Math.round((payload.dailyCount || 1) * 7));
+  const startedAt = Date.now();
   let completed = 0;
+
+  resultBox.classList.remove("hidden");
+  resultBox.innerHTML = "Generating commits... <span class='progress'>0/0 · Estimating...</span>";
+
   const progressTimer = setInterval(() => {
-    completed = Math.min(completed + 1, Number(payload.dailyCount || 1));
-    const progressText = updateProgress(startTime, Number(payload.dailyCount || 1), completed);
+    completed = Math.min(completed + 1, estimatedTotal);
+    const eta = estimateProgress(startedAt, estimatedTotal, completed);
     const node = resultBox.querySelector(".progress");
-    if (node) node.textContent = progressText;
-  }, 1000);
+    if (node) node.textContent = `${completed}/${estimatedTotal} · ${eta}`;
+  }, 800);
 
   try {
     const response = await fetch("/generate", {

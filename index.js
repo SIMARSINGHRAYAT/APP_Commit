@@ -57,12 +57,12 @@ function isDateSelected(date, payload) {
 function resolveDailyCount(date, payload) {
   const weekdayMap = payload.weekdayCounts || {};
   const weekdayKey = getDayName(date);
+  const baseCount = Number(payload.dailyCount || 1);
 
   if (weekdayMap[weekdayKey] !== undefined && Number(weekdayMap[weekdayKey]) >= 0) {
     return Number(weekdayMap[weekdayKey]);
   }
 
-  const baseCount = Number(payload.dailyCount || 1);
   if (payload.randomize) {
     const max = Number(payload.maxPerDay || baseCount || 1);
     const min = Math.min(1, max);
@@ -103,23 +103,32 @@ async function ensureGitIdentity() {
   }
 }
 
-function getSpreadTimesForDay(date, count) {
-  const startHour = 9;
-  const endHour = 20;
-  const start = moment(date).hour(startHour).minute(0).second(0).millisecond(0);
-  const end = moment(date).hour(endHour).minute(0).second(0).millisecond(0);
-
-  if (count <= 1) {
-    return [start.clone()];
+async function ensureGitHubAuth() {
+  try {
+    await execFileAsync("git", ["remote", "get-url", "origin"], { cwd: repoRoot });
+    await execFileAsync("gh", ["auth", "status"], { cwd: repoRoot });
+    await execFileAsync("gh", ["auth", "setup-git"], { cwd: repoRoot });
+  } catch (error) {
+    throw new Error(
+      "GitHub authentication is not active. Run: gh auth login -h github.com -w and then gh auth setup-git. GitHub Desktop is not required."
+    );
   }
+}
 
-  const range = end.diff(start, "minutes");
-  const step = range / (count - 1);
+function spreadTimesForDay(date, count) {
+  const start = moment(date).hour(9).minute(0).second(0).millisecond(0);
+  const end = moment(date).hour(20).minute(0).second(0).millisecond(0);
+
+  if (count <= 1) return [start.clone()];
+
+  const diffMinutes = end.diff(start, "minutes");
+  const step = diffMinutes / (count - 1);
   const times = [];
+
   for (let i = 0; i < count; i += 1) {
-    const dt = start.clone().add(Math.round(step * i), "minutes");
-    times.push(dt);
+    times.push(start.clone().add(Math.round(step * i), "minutes"));
   }
+
   return times;
 }
 
@@ -140,12 +149,11 @@ async function generateCommits(payload) {
 
   const selectedDates = buildDateWindow(startDate, endDate).filter((date) => isDateSelected(date, payload));
   if (!selectedDates.length) {
-    throw new Error("No days matched your selection. Try a different range or filter.");
+    throw new Error("No days matched your selection. Try another date range or filter.");
   }
 
   const currentBranch = (await execFileAsync("git", ["branch", "--show-current"], { cwd: repoRoot })).stdout.trim() || "main";
   const targetBranch = branchName || currentBranch;
-  const loginBranch = targetBranch;
 
   await ensureGitIdentity();
 
@@ -154,18 +162,17 @@ async function generateCommits(payload) {
 
   for (const selectedDate of selectedDates) {
     const countForDay = resolveDailyCount(selectedDate, payload);
-    const times = getSpreadTimesForDay(selectedDate, countForDay);
+    const times = spreadTimesForDay(selectedDate, countForDay);
 
     for (let i = 0; i < times.length; i += 1) {
       const commitTime = times[i];
       const isoDate = commitTime.toISOString();
       const message = `Auto commit ${created.length + 1} — ${commitTime.format("YYYY-MM-DD HH:mm")}`;
       const payloadData = {
+        commitNumber: created.length + 1,
         date: commitTime.format("YYYY-MM-DD"),
         time: commitTime.format("HH:mm"),
-        commitNumber: created.length + 1,
-        dayName: getDayName(selectedDate),
-        branch: loginBranch,
+        branch: targetBranch,
       };
 
       await fs.writeFile(dataFile, `${JSON.stringify(payloadData, null, 2)}\n`);
@@ -213,8 +220,9 @@ async function generateCommits(payload) {
   }
 
   if (pushToRemote) {
+    await ensureGitHubAuth();
     try {
-      await execFileAsync("git", ["push", "origin", targetBranch], { cwd: repoRoot });
+      await execFileAsync("git", ["push", "--set-upstream", "origin", `HEAD:${targetBranch}`], { cwd: repoRoot });
     } catch (error) {
       throw new Error(`Push failed: ${error.message}`);
     }
