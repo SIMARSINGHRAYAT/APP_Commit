@@ -1,12 +1,12 @@
 # CommitFlow for Vercel
 
-This folder is prepared for deployment on Vercel.
+This project is prepared for deployment on Vercel with a static front end and a serverless API.
 
 ## Prerequisites
 
 - A Vercel account
 - A GitHub repository connected to Vercel
-- A GitHub account with credentials assigned in Vercel environment variables
+- A GitHub OAuth app configured for the deployment domain
 
 ## Environment variables
 
@@ -14,7 +14,7 @@ Add the following in Vercel:
 
 - GITHUB_CLIENT_ID = your GitHub OAuth app client ID
 - GITHUB_CLIENT_SECRET = your GitHub OAuth app client secret
-- APP_BASE_URL = your deployment URL, e.g. `https://commit-graph-web-app.vercel.app`
+- APP_BASE_URL = your deployment URL, for example `https://your-app-name.vercel.app`
 - GITHUB_LOGIN = your GitHub username
 - GITHUB_EMAIL = your GitHub email address
 
@@ -26,26 +26,24 @@ Optional for remote pushes:
 ## GitHub OAuth setup
 
 1. Create a GitHub OAuth app at https://github.com/settings/developers.
-2. Set the "Authorization callback URL" to:
-   `https://<your-vercel-domain>/api/auth/callback`
-3. Copy the client ID and client secret into Vercel.
+2. Set the authorization callback URL to `https://<your-vercel-domain>/api/auth/callback`.
+3. Copy the client ID and client secret into the Vercel project environment variables.
 
 ## Deploy steps
 
-1. Push this folder or its contents to a GitHub repo.
-2. Import the repo into Vercel.
-3. Set the project root to this directory if needed.
-4. Add the environment variables above.
-5. Deploy the project.
+1. Install dependencies with `npm install`.
+2. Push the repository to GitHub.
+3. Import the repository into Vercel.
+4. Set the project root to this directory if Vercel prompts for it.
+5. Add the environment variables above and deploy.
 
-## Usage
+## Local checks
 
-- Open the deployed app.
-- Sign in using the GitHub auth endpoint.
-- Pick the date range and daily count.
-- Generate commits for every day in the selected range.
-- Optionally push to the configured remote.
+Run these commands before deployment:
+
+- `npm install`
+- `npm run check`
 
 ## Notes
 
-This app is designed for a deployable front-end plus a serverless API route. It uses the Vercel API routing model and keeps the same scheduler behavior as the local app.
+The app uses a root-level static UI plus a serverless API route under the `api` folder. The old empty `vercel` folder has been removed.
