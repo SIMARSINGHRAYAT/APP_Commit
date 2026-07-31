@@ -228,15 +228,25 @@ async function validateRepoBeforeSubmit(repoOwner, repoName) {
 function setSubmitting(isSubmitting) {
   if (submitBtn) {
     submitBtn.disabled = isSubmitting;
-    submitBtn.textContent = isSubmitting ? 'Generating...' : 'Generate commit schedule';
+    submitBtn.innerHTML = isSubmitting 
+      ? '<i class="ph-bold ph-spinner" style="animation: spin 1s linear infinite;"></i> Generating...' 
+      : '<i class="ph-bold ph-lightning"></i> Generate Schedule';
   }
+}
+
+// Add a quick keyframe for the spinner if needed
+if (!document.getElementById('spinKeyframe')) {
+  const style = document.createElement('style');
+  style.id = 'spinKeyframe';
+  style.innerHTML = `@keyframes spin { 100% { transform: rotate(360deg); } }`;
+  document.head.appendChild(style);
 }
 
 function renderError(message) {
   resultBox.classList.remove('hidden');
   resultBox.className = 'result result-error';
   resultBox.innerHTML = `
-    <div class="result-icon">✕</div>
+    <div class="result-icon"><i class="ph-bold ph-x"></i></div>
     <div class="result-body">
       <strong>Error</strong>
       <p>${escapeHtml(message)}</p>
@@ -249,18 +259,18 @@ function renderSuccess(data) {
   resultBox.className = 'result result-success';
   const pushNote = data.pushResult?.message || '';
   resultBox.innerHTML = `
-    <div class="result-icon">✓</div>
+    <div class="result-icon"><i class="ph-bold ph-check"></i></div>
     <div class="result-body">
       <strong>Success!</strong>
       <div class="result-stats">
         <div class="stat"><span class="stat-label">Repository</span><span class="stat-value">${escapeHtml(data.repoOwner)}/${escapeHtml(data.repoName)}</span></div>
         <div class="stat"><span class="stat-label">Branch</span><span class="stat-value">${escapeHtml(data.branch)}</span></div>
-        <div class="stat"><span class="stat-label">Commits created</span><span class="stat-value">${data.commitsCreated}</span></div>
+        <div class="stat"><span class="stat-label">Commits</span><span class="stat-value">${data.commitsCreated}</span></div>
         <div class="stat"><span class="stat-label">Date range</span><span class="stat-value">${escapeHtml(data.startDate)} → ${escapeHtml(data.endDate)}</span></div>
-        <div class="stat"><span class="stat-label">Selected days</span><span class="stat-value">${data.selectedDays}</span></div>
-        <div class="stat"><span class="stat-label">Pushed to remote</span><span class="stat-value">${data.pushToRemote ? 'Yes' : 'No (dry-run)'}</span></div>
+        <div class="stat"><span class="stat-label">Days</span><span class="stat-value">${data.selectedDays}</span></div>
+        <div class="stat"><span class="stat-label">Pushed</span><span class="stat-value">${data.pushToRemote ? 'Yes' : 'Dry-run'}</span></div>
       </div>
-      <p class="result-note">${escapeHtml(pushNote)}</p>
+      <p class="result-note"><i class="ph-bold ph-info"></i> ${escapeHtml(pushNote)}</p>
     </div>
   `;
 }
